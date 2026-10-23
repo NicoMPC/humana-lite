@@ -131,6 +131,25 @@
 .routine-preview .pv-list .n { color: var(--accent-strong); font-weight: 800; font-family: var(--font-display); }
 .routine-preview .pv-list .c { color: var(--text-3); font-style: italic; font-size: var(--fs-xs); }
 
+/* Routine builder cheveux (7 rubriques réelles V1) */
+.routine-rubrique { display: grid; gap: .6rem; padding-bottom: var(--sp-4); border-bottom: 1px dashed var(--border); }
+.routine-rubrique:last-child { border-bottom: 0; padding-bottom: 0; }
+.routine-rubrique h4 { font-family: var(--font-display); font-size: var(--fs-md, 1rem); font-weight: 700; color: var(--sage-700); }
+.etape-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .4rem; }
+.tag-input-row { display: flex; gap: .4rem; }
+.tag-input-row .input { flex: 1; }
+.tag-list { display: flex; flex-wrap: wrap; gap: .4rem; }
+.tag-chip { display: inline-flex; align-items: center; gap: .4rem; padding: .3rem .7rem; border-radius: var(--r-pill); background: var(--sage-100); color: var(--sage-700); font-size: var(--fs-sm); font-weight: 600; }
+.tag-chip button { color: var(--sage-700); opacity: .7; }
+.tag-chip button:hover { opacity: 1; }
+.library-toggle { display: flex; align-items: center; gap: .4rem; padding: .5rem .7rem; border: 1.5px dashed var(--border-strong); border-radius: var(--r-md); background: var(--bg-muted); font-size: var(--fs-sm); font-weight: 700; color: var(--text-2); cursor: pointer; width: 100%; text-align: left; }
+.library-groups { display: grid; gap: var(--sp-3); max-height: 48vh; overflow: auto; padding: .4rem .1rem; }
+.library-group h5 { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); margin-bottom: .3rem; }
+.selected-list { display: grid; gap: .4rem; }
+.selected-item { display: flex; align-items: center; gap: .4rem; }
+.selected-item .input { flex: 1; }
+.selected-item .selected-cat { flex: 0 0 150px; }
+
 /* Lifestyle */
 .tips-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: .6rem; }
 .tip-card { display: flex; gap: .7rem; align-items: flex-start; padding: .85rem .95rem; border: 1.5px solid var(--border); border-radius: var(--r-md); background: var(--bg-elevated); cursor: pointer; text-align: left; transition: all var(--dur-fast); }

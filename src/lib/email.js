@@ -1,8 +1,11 @@
 /**
- * Préparation de l'email : sujet + corps en texte brut, ouverture de Gmail
- * (onglet pré-rempli). Jamais d'envoi automatique : la pièce jointe (PDF)
- * ne peut pas être pré-remplie par URL, la praticienne la glisse depuis le
- * dossier archivé (ou le dossier Téléchargements si l'archivage a échoué).
+ * Préparation de l'email : sujet + corps en texte brut.
+ * Deux usages : (1) `autoAttache=true` — le texte est envoyé tel quel au
+ * backend (`archiveEtEnvoyer`), qui joint lui-même le PDF déjà archivé ;
+ * (2) `autoAttache=false` (répli manuel, si l'envoi auto échoue) — ouverture
+ * de Gmail (onglet pré-rempli), la pièce jointe ne pouvant pas être
+ * pré-remplie par URL : la praticienne la glisse depuis le dossier archivé
+ * (ou le dossier Téléchargements si l'archivage a aussi échoué).
  */
 
 const SUJETS = {
@@ -23,8 +26,9 @@ const OBJETS = {
  * @param {string} [p.fileName] nom du PDF à joindre
  * @param {boolean} [p.tutoiement=false] « tu » au lieu de « vous »
  * @param {boolean} [p.archiveOk=true] false si l'archivage a échoué (PDF téléchargé en local)
+ * @param {boolean} [p.autoAttache=false] true si le backend joint lui-même le PDF (pas de geste manuel à décrire)
  */
-export function buildEmail({ doc, fileUrl, folderUrl, fileName, tutoiement = false, archiveOk = true }) {
+export function buildEmail({ doc, fileUrl, folderUrl, fileName, tutoiement = false, archiveOk = true, autoAttache = false }) {
   const m = tutoiement ? 'tu' : 'vous';
   const boutique = doc.boutique?.nom || 'Hu’mana';
   const prenom = doc.client?.prenom || '';
@@ -35,9 +39,13 @@ export function buildEmail({ doc, fileUrl, folderUrl, fileName, tutoiement = fal
     '',
     `Merci pour ${contexte}. ${tutoiement ? 'Tu trouveras' : 'Vous trouverez'} ci-joint ${objet}.`,
     tutoiement ? 'N’hésite pas à me poser tes questions.' : 'N’hésitez pas à me poser vos questions.',
-    '',
-    `Pièce jointe : ${fileName || 'le PDF'}${archiveOk ? ' (à glisser depuis le dossier archivé)' : ' (téléchargé sur cet ordinateur, à glisser depuis le dossier Téléchargements)'}`,
   ];
+  if (!autoAttache) {
+    lignes.push(
+      '',
+      `Pièce jointe : ${fileName || 'le PDF'}${archiveOk ? ' (à glisser depuis le dossier archivé)' : ' (téléchargé sur cet ordinateur, à glisser depuis le dossier Téléchargements)'}`,
+    );
+  }
   if (fileUrl) lignes.push(`Lien du document : ${fileUrl}`);
   else if (folderUrl) lignes.push(`Dossier : ${folderUrl}`);
   lignes.push('', 'À très vite,', doc.meta?.auteur || '', boutique);

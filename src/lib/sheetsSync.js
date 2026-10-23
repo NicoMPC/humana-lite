@@ -1,8 +1,11 @@
 /**
- * Archivage des PDF via Google Apps Script (voir `apps-script/Code.gs`) :
- * chaque PDF part dans un sous-dossier Drive par cliente, indexé dans le
- * classeur partagé. Aucune fonction ne lève d'exception : toujours
- * `{ ok:false, error }` en cas d'échec (réseau, token, script indisponible).
+ * Archivage des PDF + envoi e-mail via Google Apps Script (voir
+ * `apps-script/Code.gs`) : chaque PDF part dans un sous-dossier Drive par
+ * cliente, indexé dans le classeur partagé, et l'e-mail (sujet/corps déjà
+ * composés côté client par `buildEmail()`) part automatiquement — ou reste
+ * en attente d'un clic de validation si l'option C est active. Aucune
+ * fonction ne lève d'exception : toujours `{ ok:false, error }` en cas
+ * d'échec (réseau, token, script indisponible).
  */
 
 // Projet Apps Script LITE autonome (distinct de celui de la boutique) : à renseigner après déploiement.
@@ -64,14 +67,97 @@ export async function pullArchives() {
 
 /**
  * Archive un PDF (data-URL base64) dans le dossier Drive de la cliente.
- * -> { ok, clientId, folderUrl, fileUrl, created } ou { ok:false, error }.
+ * -> { ok, clientId, folderUrl, fileUrl, fileId, created } ou { ok:false, error }.
  */
 export async function archivePdf({ client, docType, fileName, dataUrl, meta } = {}) {
   if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
   try {
     const res = await apiPost('archivePdf', { client, docType, fileName, dataUrl, meta });
     if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
-    return { ok: true, clientId: res.clientId, folderUrl: res.folderUrl, fileUrl: res.fileUrl, created: !!res.created };
+    return { ok: true, clientId: res.clientId, folderUrl: res.folderUrl, fileUrl: res.fileUrl, fileId: res.fileId, created: !!res.created };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Archive le PDF ET envoie l'e-mail (sujet/corps déjà composés côté appli) —
+ * pièce jointe = le PDF qui vient d'être archivé, pas de re-téléversement.
+ * Si l'option C (validation avant envoi) est active côté Réglages, l'e-mail
+ * est mis en attente d'un clic humain : `envoiStatut` vaut alors 'en_attente'
+ * au lieu de 'envoye'. La relance à J+14 est programmée côté serveur dès
+ * l'envoi réel (immédiat ou validé plus tard), jamais dès l'archivage seul.
+ * -> { ok, clientId, folderUrl, fileUrl, fileId, created, envoiStatut, pendingId? }
+ */
+export async function archiveEtEnvoyer({ client, docType, fileName, dataUrl, meta, email, boutique, tutoiement } = {}) {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  try {
+    const res = await apiPost('archiveEtEnvoyer', { client, docType, fileName, dataUrl, meta, email, boutique, tutoiement });
+    if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
+    return {
+      ok: true, clientId: res.clientId, folderUrl: res.folderUrl, fileUrl: res.fileUrl, fileId: res.fileId,
+      created: !!res.created, envoiStatut: res.envoiStatut, pendingId: res.pendingId,
+    };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Liste des e-mails archivés mais en attente de validation (option C). -> { ok, envois } */
+export async function pullEnvoisEnAttente() {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED, envois: [] };
+  try {
+    const res = await apiGet('pullEnvoisEnAttente');
+    if (!res?.ok) return { ok: false, error: res?.error || 'Réponse inattendue du backend', envois: [] };
+    return { ok: true, envois: Array.isArray(res.envois) ? res.envois : [] };
+  } catch (err) {
+    return { ...fail(err), envois: [] };
+  }
+}
+
+/** Envoie réellement un e-mail resté en attente (clic de validation). -> { ok } */
+export async function validerEnvoi(id) {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  try {
+    const res = await apiPost('validerEnvoi', { id });
+    if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Rejette un e-mail en attente sans l'envoyer. -> { ok } */
+export async function annulerEnvoi(id) {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  try {
+    const res = await apiPost('annulerEnvoi', { id });
+    if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Réglage global (option C). -> { ok, validationAvantEnvoi } */
+export async function getReglagesEnvoi() {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  try {
+    const res = await apiGet('getReglages');
+    if (!res?.ok) return { ok: false, error: res?.error || 'Réponse inattendue du backend' };
+    return { ok: true, validationAvantEnvoi: !!res.validationAvantEnvoi };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Change le réglage global (option C). -> { ok, validationAvantEnvoi } */
+export async function setValidationAvantEnvoi(validationAvantEnvoi) {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  try {
+    const res = await apiPost('definirValidationAvantEnvoi', { validationAvantEnvoi: !!validationAvantEnvoi });
+    if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
+    return { ok: true, validationAvantEnvoi: !!res.validationAvantEnvoi };
   } catch (err) {
     return fail(err);
   }

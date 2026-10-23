@@ -8,10 +8,13 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { DEFAULT_KINDS } from '../data/constants';
 import { todayISO } from '../lib/dates';
 import { useStore } from './useStore';
+import { emptyRoutineCheveux } from '../lib/pdf/routineModel';
 
-const emptyData = (kind, footerMessage) => {
+// peau : grille réelle non reçue, modèle historique matin/soir/hebdo conservé.
+// cheveux : 7 rubriques réelles V1 (voir docs/CONTRACT.md et data/conseilsCheveux.js).
+const emptyData = (kind, footerMessage, type) => {
   switch (kind) {
-    case 'routine': return { items: [] };
+    case 'routine': return type === 'cheveux' ? emptyRoutineCheveux() : { items: [] };
     case 'conseils': return { texte: '' };
     case 'lifestyle': return { tips: [] };
     case 'message': return { texte: footerMessage };
@@ -31,7 +34,7 @@ export function newDoc(type, auteur) {
     boutique: { ...settings.boutique },
     footerMessage,
     reponses: {},
-    blocks: DEFAULT_KINDS[type].map((kind) => ({ id: kind, kind, on: true, data: emptyData(kind, footerMessage) })),
+    blocks: DEFAULT_KINDS[type].map((kind) => ({ id: kind, kind, on: true, data: emptyData(kind, footerMessage, type) })),
   };
 }
 

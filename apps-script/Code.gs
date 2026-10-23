@@ -1,9 +1,12 @@
 /**
  * Hu'mana Lite — backend Google Apps Script lié au classeur.
  *
- * Rôle unique : archiver les PDF produits par l'appli (fiches conseil) dans
- * Google Drive, un sous-dossier par cliente, et tenir un index dans le Sheet.
- * Aucune fonction d'envoi d'e-mail ici (volontairement).
+ * Rôle : archiver les PDF produits par l'appli (fiches conseil) dans Google
+ * Drive, un sous-dossier par cliente, tenir un index dans le Sheet, ET —
+ * depuis le devis signé du 22/10/2026 — envoyer l'e-mail à la cliente,
+ * programmer sa relance à J+14 et tracer chaque envoi dans l'Agenda Google.
+ * Option C (déjà acquise par les deux gérantes) : un réglage global peut
+ * forcer une validation humaine avant départ réel de chaque e-mail.
  *
  * Projet Apps Script AUTONOME (pas celui de la boutique) : il ouvre le
  * classeur partagé par id (SPREADSHEET_ID) mais n'utilise que ses propres
@@ -11,6 +14,8 @@
  * Clientes / Diagnostics / Produits / Settings (onglets de la boutique) :
  *   ArchClientes  : id | cle | prenom | nom | email | folderUrl | date_creation | json
  *   ArchDocuments : id | client_id | type | date | auteur | url | nom | json
+ *   EnvoisEnAttente : id | client_id | email | prenom | sujet | date_creation | statut | json
+ *   RelanceQueue  : id | client_id | email | prenom | date_envoi_diag | date_relance_prevue | statut | json
  * La colonne "json" fait foi ; les autres colonnes sont là pour un coup d'oeil.
  *
  * Sécurité : toute requête (GET ou POST) doit porter le `token`, comparé à la
@@ -22,20 +27,46 @@
  * TOKEN = <nouveau token, identique à LITE_TOKEN de src/lib/sheetsSync.js> >
  * Déployer > Nouveau déploiement > Application
  * Web > Exécuter en tant que "Moi" > Accès "Tout le monde". Au premier
- * lancement, autoriser les accès Drive et Sheets.
+ * lancement, autoriser les accès Drive, Sheets, Gmail et Agenda.
+ * Une fois déployé, exécuter UNE SEULE FOIS `installerDeclencheurs_` depuis
+ * l'éditeur (sélectionner la fonction en haut, Exécuter) pour poser le
+ * déclencheur quotidien des relances — voir commentaire sur la fonction.
  *
- * Actions : GET  pull -> { ok, clients, documents } ; GET ping -> { ok }
- *           POST archivePdf -> { ok, clientId, folderUrl, fileUrl, created }
+ * Actions : GET  pull -> { ok, clients, documents }
+ *           GET  ping -> { ok }
+ *           GET  getReglages -> { ok, validationAvantEnvoi }
+ *           GET  pullEnvoisEnAttente -> { ok, envois }
+ *           POST archivePdf -> { ok, clientId, folderUrl, fileUrl, fileId, created }
+ *           POST archiveEtEnvoyer -> { ok, clientId, folderUrl, fileUrl, fileId, created, envoiStatut }
+ *           POST validerEnvoi -> { ok }
+ *           POST annulerEnvoi -> { ok }
+ *           POST definirValidationAvantEnvoi -> { ok, validationAvantEnvoi }
  */
 
 const SPREADSHEET_ID = '1SrQZBSWigFrw3H62_j56iRowGgWXOFfJZGMZG2UO83U';
-const SHEETS = { clients: 'ArchClientes', documents: 'ArchDocuments' };
+const SHEETS = {
+  clients: 'ArchClientes',
+  documents: 'ArchDocuments',
+  pending: 'EnvoisEnAttente',
+  relances: 'RelanceQueue',
+};
 const HEADERS = {
   ArchClientes: ['id', 'cle', 'prenom', 'nom', 'email', 'folderUrl', 'date_creation', 'json'],
   ArchDocuments: ['id', 'client_id', 'type', 'date', 'auteur', 'url', 'nom', 'json'],
+  EnvoisEnAttente: ['id', 'client_id', 'email', 'prenom', 'sujet', 'date_creation', 'statut', 'json'],
+  RelanceQueue: ['id', 'client_id', 'email', 'prenom', 'date_envoi_diag', 'date_relance_prevue', 'statut', 'json'],
 };
 const ROOT_FOLDER_NAME = "Archives Hu'mana";
 const MAX_BASE64_LENGTH = 35 * 1024 * 1024;
+
+// Chiffre figé par le devis signé + les réponses d'onboarding (14 jours,
+// confirmé deux fois) : ne jamais le changer sans instruction explicite.
+const RELANCE_DELAI_JOURS = 14;
+
+// Option C (« chaque envoi/relance attend votre clic, avec aperçu ») déjà
+// acquise par Jessie et Nathalie pour elles-mêmes : activée par défaut tant
+// qu'aucun réglage n'a encore été écrit en Propriétés du script.
+const VALIDATION_AVANT_ENVOI_DEFAUT = true;
 
 function getToken_() {
   return PropertiesService.getScriptProperties().getProperty('TOKEN');
@@ -158,6 +189,21 @@ function getClientFolder_(root, label) {
   return root.createFolder(label);
 }
 
+/** yyyy-MM-dd, fuseau du script (évite les décalages UTC sur les comparaisons de dates). */
+function dateStr_(d) {
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+function ajourdhui_() {
+  return dateStr_(new Date());
+}
+
+function ajouterJours_(dateStrDepart, n) {
+  const d = new Date(dateStrDepart + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return dateStr_(d);
+}
+
 /** payload: { client:{id?,prenom,nom,email?}, docType, fileName, dataUrl, meta:{date,auteur,lieu} } */
 function archivePdf_(p) {
   if (!p || typeof p !== 'object') throw new Error('Requête vide');
@@ -216,10 +262,254 @@ function archivePdf_(p) {
       client_id: doc.client_id, type: doc.type, date: doc.date, auteur: doc.auteur, url: doc.url, nom: doc.nom,
     });
     SpreadsheetApp.flush();
-    return { clientId: client.id, folderUrl: client.folderUrl, fileUrl, created };
+    return { client, clientId: client.id, folderUrl: client.folderUrl, fileUrl, fileId: file.getId(), created };
   } finally {
     lock.releaseLock();
   }
+}
+
+/* ---------------------------------------------------------------------- *
+ * Envoi auto, relance J+14, trace Agenda, validation humaine (option C)
+ * ---------------------------------------------------------------------- */
+
+function getValidationAvantEnvoi_() {
+  const raw = PropertiesService.getScriptProperties().getProperty('VALIDATION_AVANT_ENVOI');
+  if (raw == null) return VALIDATION_AVANT_ENVOI_DEFAUT;
+  return raw === 'true';
+}
+
+function definirValidationAvantEnvoi_(bool) {
+  PropertiesService.getScriptProperties().setProperty('VALIDATION_AVANT_ENVOI', bool ? 'true' : 'false');
+  return getValidationAvantEnvoi_();
+}
+
+/** Envoie le mail avec le PDF déjà archivé en pièce jointe (pas de re-téléchargement). */
+function envoyerMail_(to, sujet, corps, fileId, nomExpediteur) {
+  if (!to) throw new Error('E-mail de la cliente manquant');
+  const file = DriveApp.getFileById(fileId);
+  const options = { name: nomExpediteur || "Hu'mana", attachments: [file.getBlob()] };
+  GmailApp.sendEmail(to, sujet, corps, options);
+}
+
+/** Trace contractuelle dans l'Agenda Google : nom cliente, date, lien du PDF. */
+function creerTraceAgenda_(titre, description) {
+  try {
+    CalendarApp.getDefaultCalendar().createEvent(titre, new Date(), new Date(Date.now() + 15 * 60 * 1000), { description });
+  } catch (e) {
+    // La trace agenda est une preuve, pas une condition d'envoi : un échec ici ne doit jamais bloquer l'e-mail déjà parti.
+  }
+}
+
+// Texte de relance RÉEL rédigé par la cliente (onboarding, clé relance_texte_remarque),
+// gardé fidèle au fond ; variante « tu » dérivée à la main (même contenu, pronoms adaptés).
+const RELANCE_TEXTE = {
+  vous: [
+    'Bonjour {prenom},',
+    '',
+    "Cela fait déjà {delai} jours depuis votre diagnostic Hu'mana et nous voulions prendre de vos nouvelles.",
+    '',
+    'Comment se passe votre nouvelle routine ?',
+    '- Arrivez-vous à la suivre facilement ?',
+    '- Comment votre peau / vos cheveux réagissent-ils ?',
+    '- Avez-vous déjà remarqué une évolution, même légère ?',
+    '- Y a-t-il un produit, une étape ou une fréquence qui vous pose difficulté ?',
+    '- Êtes-vous satisfaite et prenez-vous plaisir à utiliser votre routine ?',
+    '- Avez-vous des questions ou quelque chose que vous aimeriez ajuster ?',
+    '',
+    'Vous pouvez simplement nous répondre par SMS. Et si vous préférez en parler de vive voix, nous pouvons aussi vous proposer un petit appel de suivi.',
+    '',
+    'À très vite,',
+    '{signature}',
+  ].join('\n'),
+  tu: [
+    'Bonjour {prenom},',
+    '',
+    "Cela fait déjà {delai} jours depuis ton diagnostic Hu'mana et on voulait prendre de tes nouvelles.",
+    '',
+    'Comment se passe ta nouvelle routine ?',
+    '- Arrives-tu à la suivre facilement ?',
+    '- Comment ta peau / tes cheveux réagissent-ils ?',
+    '- As-tu déjà remarqué une évolution, même légère ?',
+    '- Y a-t-il un produit, une étape ou une fréquence qui te pose difficulté ?',
+    '- Es-tu satisfaite et prends-tu plaisir à utiliser ta routine ?',
+    '- As-tu des questions ou quelque chose que tu aimerais ajuster ?',
+    '',
+    'Tu peux simplement nous répondre par SMS. Et si tu préfères en parler de vive voix, on peut aussi te proposer un petit appel de suivi.',
+    '',
+    'À très vite,',
+    '{signature}',
+  ].join('\n'),
+};
+
+function texteRelance_(prenom, tutoiement, boutiqueNom) {
+  const tpl = tutoiement ? RELANCE_TEXTE.tu : RELANCE_TEXTE.vous;
+  const signature = "L'équipe " + (boutiqueNom || "Hu'mana");
+  return tpl
+    .replace('{prenom}', prenom || '')
+    .replace('{delai}', String(RELANCE_DELAI_JOURS))
+    .replace('{signature}', signature);
+}
+
+/** Programme la relance J+14 pour ce client (une ligne par envoi initial/validé). */
+function programmerRelance_(client, boutiqueNom, tutoiement) {
+  if (!client.email) return; // pas d'email, pas de relance possible
+  const aujourdhui = ajourdhui_();
+  const relance = {
+    id: uid_('rel'),
+    client_id: client.id,
+    email: client.email,
+    prenom: client.prenom,
+    nom: client.nom,
+    boutiqueNom: boutiqueNom || "Hu'mana",
+    tutoiement: !!tutoiement,
+    date_envoi_diag: aujourdhui,
+    date_relance_prevue: ajouterJours_(aujourdhui, RELANCE_DELAI_JOURS),
+    statut: 'en_attente',
+  };
+  upsert_(SHEETS.relances, relance, {
+    client_id: relance.client_id, email: relance.email, prenom: relance.prenom,
+    date_envoi_diag: relance.date_envoi_diag, date_relance_prevue: relance.date_relance_prevue, statut: relance.statut,
+  });
+}
+
+/**
+ * payload : { client, docType, fileName, dataUrl, meta, email:{to,sujet,corps}, boutique:{nom}, tutoiement }
+ * Archive (réutilise archivePdf_) puis, selon le réglage global :
+ *  - validation désactivée : envoie tout de suite, trace Agenda, programme la relance J+14 ;
+ *  - validation activée (option C) : met l'e-mail en attente, rien n'est envoyé sans clic humain.
+ */
+function archiveEtEnvoyer_(p) {
+  const archive = archivePdf_(p);
+  const email = (p && p.email) || {};
+  const boutiqueNom = (p && p.boutique && p.boutique.nom) || "Hu'mana";
+  const client = archive.client;
+
+  if (getValidationAvantEnvoi_()) {
+    const pending = {
+      id: uid_('env'),
+      client_id: client.id,
+      email: email.to || client.email || '',
+      prenom: client.prenom,
+      sujet: email.sujet || '',
+      corps: email.corps || '',
+      fileId: archive.fileId,
+      fileUrl: archive.fileUrl,
+      fileName: p.fileName,
+      boutiqueNom,
+      tutoiement: !!p.tutoiement,
+      date_creation: new Date().toISOString(),
+      statut: 'en_attente',
+    };
+    upsert_(SHEETS.pending, pending, {
+      client_id: pending.client_id, email: pending.email, prenom: pending.prenom,
+      sujet: pending.sujet, date_creation: pending.date_creation, statut: pending.statut,
+    });
+    SpreadsheetApp.flush();
+    return { clientId: archive.clientId, folderUrl: archive.folderUrl, fileUrl: archive.fileUrl, fileId: archive.fileId, created: archive.created, envoiStatut: 'en_attente', pendingId: pending.id };
+  }
+
+  envoyerMail_(email.to || client.email, email.sujet, email.corps, archive.fileId, boutiqueNom);
+  creerTraceAgenda_("Envoi — " + client.prenom + ' ' + client.nom, 'PDF : ' + archive.fileUrl);
+  programmerRelance_(client, boutiqueNom, p.tutoiement);
+  SpreadsheetApp.flush();
+  return { clientId: archive.clientId, folderUrl: archive.folderUrl, fileUrl: archive.fileUrl, fileId: archive.fileId, created: archive.created, envoiStatut: 'envoye' };
+}
+
+/** Envoie réellement un e-mail resté en attente (clic de validation côté appli). */
+function validerEnvoi_(id) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const pendings = readAll_(SHEETS.pending);
+    const pending = pendings.find((x) => x && x.id === id);
+    if (!pending) throw new Error('E-mail en attente introuvable');
+    if (pending.statut !== 'en_attente') throw new Error('Cet e-mail a déjà été traité');
+
+    envoyerMail_(pending.email, pending.sujet, pending.corps, pending.fileId, pending.boutiqueNom);
+    creerTraceAgenda_('Envoi (validé) — ' + pending.prenom, 'PDF : ' + pending.fileUrl);
+
+    pending.statut = 'envoye';
+    upsert_(SHEETS.pending, pending, {
+      client_id: pending.client_id, email: pending.email, prenom: pending.prenom,
+      sujet: pending.sujet, date_creation: pending.date_creation, statut: pending.statut,
+    });
+
+    const clients = readAll_(SHEETS.clients);
+    const client = clients.find((x) => x && x.id === pending.client_id) || { id: pending.client_id, prenom: pending.prenom, nom: '', email: pending.email };
+    programmerRelance_(client, pending.boutiqueNom, pending.tutoiement);
+    SpreadsheetApp.flush();
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Rejette un e-mail en attente sans l'envoyer (la praticienne a changé d'avis). */
+function annulerEnvoi_(id) {
+  const pendings = readAll_(SHEETS.pending);
+  const pending = pendings.find((x) => x && x.id === id);
+  if (!pending) throw new Error('E-mail en attente introuvable');
+  if (pending.statut !== 'en_attente') throw new Error('Cet e-mail a déjà été traité');
+  pending.statut = 'annule';
+  upsert_(SHEETS.pending, pending, {
+    client_id: pending.client_id, email: pending.email, prenom: pending.prenom,
+    sujet: pending.sujet, date_creation: pending.date_creation, statut: pending.statut,
+  });
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+
+/** Liste des e-mails encore en attente de validation (pour l'écran Réglages). */
+function listerEnvoisEnAttente_() {
+  return readAll_(SHEETS.pending).filter((x) => x && x.statut === 'en_attente');
+}
+
+/**
+ * Déclencheur quotidien (voir installerDeclencheurs_) : envoie chaque relance
+ * dont la date prévue est atteinte, trace l'Agenda, puis marque la ligne.
+ */
+function verifierRelances_() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const today = ajourdhui_();
+    const relances = readAll_(SHEETS.relances);
+    relances.forEach((r) => {
+      if (!r || r.statut !== 'en_attente') return;
+      if (String(r.date_relance_prevue || '') > today) return;
+      try {
+        const corps = texteRelance_(r.prenom, r.tutoiement, r.boutiqueNom);
+        const sujet = 'Des nouvelles de votre routine — ' + (r.boutiqueNom || "Hu'mana");
+        MailApp.sendEmail(r.email, sujet, corps, { name: r.boutiqueNom || "Hu'mana" });
+        creerTraceAgenda_('Relance J+' + RELANCE_DELAI_JOURS + ' — ' + r.prenom, 'Relance automatique envoyée à ' + r.email);
+        r.statut = 'envoyee';
+      } catch (e) {
+        r.erreur = errMsg_(e); // on retente le lendemain, statut reste en_attente
+      }
+      upsert_(SHEETS.relances, r, {
+        client_id: r.client_id, email: r.email, prenom: r.prenom,
+        date_envoi_diag: r.date_envoi_diag, date_relance_prevue: r.date_relance_prevue, statut: r.statut,
+      });
+    });
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * À exécuter UNE SEULE FOIS manuellement depuis l'éditeur Apps Script après
+ * déploiement (sélectionner `installerDeclencheurs_` dans le menu déroulant
+ * en haut, puis Exécuter — autorise alors les accès Gmail/Agenda demandés).
+ * Un déclencheur posé par du code poussé seul ne s'active pas : il faut ce
+ * geste manuel une fois, ensuite tout tourne seul. Ré-exécutable sans risque
+ * de doublon (supprime l'ancien déclencheur avant d'en poser un nouveau).
+ */
+function installerDeclencheurs_() {
+  ScriptApp.getProjectTriggers().forEach((t) => {
+    if (t.getHandlerFunction() === 'verifierRelances_') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('verifierRelances_').timeBased().everyDays(1).atHour(9).create();
 }
 
 function doGet(e) {
@@ -230,6 +520,12 @@ function doGet(e) {
     if (action === 'ping') return json_({ ok: true, pong: true });
     if (action === 'pull') {
       return json_({ ok: true, clients: readAll_(SHEETS.clients), documents: readAll_(SHEETS.documents) });
+    }
+    if (action === 'getReglages') {
+      return json_({ ok: true, validationAvantEnvoi: getValidationAvantEnvoi_() });
+    }
+    if (action === 'pullEnvoisEnAttente') {
+      return json_({ ok: true, envois: listerEnvoisEnAttente_() });
     }
     return json_({ ok: false, error: 'Action inconnue : ' + action });
   } catch (err) {
@@ -247,6 +543,14 @@ function doPost(e) {
     switch (action) {
       case 'archivePdf':
         return json_(Object.assign({ ok: true }, archivePdf_(payload)));
+      case 'archiveEtEnvoyer':
+        return json_(Object.assign({ ok: true }, archiveEtEnvoyer_(payload)));
+      case 'validerEnvoi':
+        return json_(Object.assign({ ok: true }, validerEnvoi_(payload && payload.id)));
+      case 'annulerEnvoi':
+        return json_(Object.assign({ ok: true }, annulerEnvoi_(payload && payload.id)));
+      case 'definirValidationAvantEnvoi':
+        return json_({ ok: true, validationAvantEnvoi: definirValidationAvantEnvoi_(!!(payload && payload.validationAvantEnvoi)) });
       default:
         return json_({ ok: false, error: 'Action inconnue : ' + action });
     }

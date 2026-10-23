@@ -17,9 +17,11 @@ import { drawDiagnostic, drawRoutine, drawConseils } from './routinePdf.js';
 import { drawLifestyle } from './lifestylePdf.js';
 import { fullName, safeFileName } from '../format.js';
 import { formatDateLong } from '../dates.js';
+import { emptyRoutineCheveux } from './routineModel.js';
 
 export { THEMES };
 export { browserAssetLoader } from './assets.js';
+export { emptyRoutineCheveux } from './routineModel.js';
 
 const TYPE_FILE = { peau: 'Peau', cheveux: 'Cheveux', lifestyle: 'Lifestyle' };
 const TYPE_TITLES = {
@@ -40,7 +42,9 @@ const DRAWERS = {
 const DEFAULT_DATA = {
   entete: () => ({}),
   diagnostic: () => ({}),
-  routine: () => ({ items: [] }),
+  // peau : grille réelle non reçue, on garde le modèle historique matin/soir/hebdo.
+  // cheveux : 7 rubriques réelles V1.
+  routine: (type) => (type === 'cheveux' ? emptyRoutineCheveux() : { items: [] }),
   conseils: () => ({ texte: '' }),
   lifestyle: () => ({ tips: [] }),
   message: () => ({ texte: '' }),
@@ -52,7 +56,7 @@ export function DEFAULT_BLOCKS(type) {
   const kinds = type === 'lifestyle'
     ? ['entete', 'lifestyle', 'message', 'coordonnees']
     : ['entete', 'diagnostic', 'routine', 'conseils', 'message', 'coordonnees'];
-  return kinds.map((kind) => ({ id: kind, kind, on: true, data: DEFAULT_DATA[kind]() }));
+  return kinds.map((kind) => ({ id: kind, kind, on: true, data: DEFAULT_DATA[kind](type) }));
 }
 
 /** Nom de fichier : `<Type>_<Nom>_<Prenom>_<AAAA-MM-JJ>.pdf`. */

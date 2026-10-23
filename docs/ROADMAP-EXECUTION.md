@@ -36,9 +36,9 @@ Risque à surveiller : la clause "Mise en service" (5 jours ouvrés après signa
 | Lot | Contenu | Agent | Dépend de | Test de validation |
 |---|---|---|---|---|
 | 0 | Cadrage & accès : cahier des charges cheveux V1, modèle fiche visage, charte, compte Google dédié, décision GitHub/hébergement | — (pas de code) | — | Checklist d'accès cochée |
-| 1 | Fondations : git init + repo GitHub privé + invitations, compte Google dédié configuré, premier déploiement en ligne | Infra | Lot 0 | App en ligne, connexion OK |
-| 2 | Vraies grilles Hu'mana (cheveux V1 + peau si reçue) + vraie charte sur les 3 thèmes PDF | Contenu/Diagnostic | Lot 0 | PDF généré conforme à la maquette validée par Nathalie |
-| 3 | Process auto bout-en-bout : formulaire pré-rdv → Drive, envoi auto e-mail, relance J+14, trace Agenda | Backend Apps Script + Intégration front | Lot 1 | Scénario complet simulé validé |
+| 1 | Fondations : git init + repo GitHub privé + invitations, compte Google dédié configuré, premier déploiement en ligne | Infra | Lot 0 | ✅ repo privé créé et poussé (`github.com/NicoMPC/humana-lite`). Reste : go pour GitHub Pages (en attente), invitations Nathalie/Jessie (comptes GitHub à vérifier) |
+| 2 | Vraies grilles Hu'mana (cheveux V1 + peau si reçue) + vraie charte sur les 3 thèmes PDF | Contenu/Diagnostic | Lot 0 | ✅ cheveux fait (23/10, agent) : vraie grille dans `questions.js`, 7 rubriques réelles dans le compositeur PDF (`routinePdf.js`, `routineModel.js`, `RoutineBuilderCheveux.jsx`), bibliothèque de conseils (`conseilsCheveux.js`). `npm run build` + `test-pdf.mjs` OK. Peau toujours générique, en attente du modèle |
+| 3 | Process auto bout-en-bout : formulaire pré-rdv → Drive, envoi auto e-mail, relance J+14, trace Agenda | Backend Apps Script + Intégration front | Lot 1 | ✅ envoi auto + relance J+14 (figée) + trace Agenda + toggle option C fait (23/10, agent), code prêt mais **déploiement manuel Apps Script requis** (voir tracker). Formulaire pré-rdv délibérément reporté à une session dédiée |
 | 4 | Connexion personnelle (remplace le code partagé) | Auth | Lot 1 | Connexion individuelle testée |
 | 5 | Option B : dossier cliente complet (santé, notes, bilan/photos, synthèse) | Dossier cliente | Lot 3 | Fiche test avec note + photo persistée |
 | 6 | Option C : validation avant envoi (bascule manuel/auto) | Backend Apps Script + Intégration front | Lots 3, 5 | Mode validation testé dans les deux sens |

@@ -6,7 +6,7 @@ import { useStudio } from '../store/useStudio';
 import { toast, confirmDialog } from '../store/useUI';
 import { DIAG_TYPES, THEME_SWATCHES } from '../data/constants';
 import { QUESTIONS_DEMO } from '../data/questions';
-import { renderPdf, archivePdf } from '../lib/studioBridge';
+import { renderPdf, archivePdf, archiveEtEnvoyer } from '../lib/studioBridge';
 import { buildEmail, gmailComposeUrl } from '../lib/email';
 import { Button, Field, Input, Modal, Notice, Segmented, Select } from '../components/ui';
 import { QuizStep } from '../components/diagnostic/QuizStep';
@@ -156,32 +156,61 @@ function ComposeStep({ doc }) {
     setBusy(mode);
     try {
       const pdf = await renderPdf(doc);
+      const meta = { date: doc.meta.date, auteur: doc.meta.auteur, lieu: doc.meta.lieu };
+
+      if (mode === 'archive') {
+        let res;
+        try {
+          res = await archivePdf({ client: doc.client, docType: doc.type, fileName: pdf.fileName, dataUrl: pdf.dataUrl, meta });
+        } catch (e) {
+          res = { ok: false, error: String(e) };
+        }
+        const archiveOk = !!res?.ok;
+        if (archiveOk) {
+          if (res.clientId && res.clientId !== doc.client.id) actions.setClient({ ...doc.client, id: res.clientId });
+          toast(res.created ? 'Archivé — nouveau dossier créé pour la cliente.' : 'Archivé dans le dossier de la cliente.', { duration: 9000, action: res.fileUrl ? { label: 'Ouvrir le PDF', onClick: () => window.open(res.fileUrl, '_blank') } : undefined });
+        } else {
+          downloadBlob(pdf.blob, pdf.fileName); // ne jamais perdre le document
+          toast(`Archivage impossible : le PDF a été téléchargé sur cet ordinateur (${pdf.fileName}). Gardez-le, puis réessayez plus tard.`, { type: 'error', duration: 15000 });
+        }
+        URL.revokeObjectURL(pdf.url);
+        setResult({ mode, archiveOk });
+        return;
+      }
+
+      // mode === 'send' : envoi automatique par défaut (archive + e-mail en un seul
+      // aller-retour serveur), avec le PDF déjà joint côté backend ; repli manuel
+      // (Gmail pré-rempli, pièce jointe à glisser) si le serveur échoue — jamais
+      // d'échec silencieux, c'est une promesse du devis.
+      const emailDraft = buildEmail({ doc, fileName: pdf.fileName, tutoiement, archiveOk: true, autoAttache: true });
       let res;
       try {
-        res = await archivePdf({ client: doc.client, docType: doc.type, fileName: pdf.fileName, dataUrl: pdf.dataUrl, meta: { date: doc.meta.date, auteur: doc.meta.auteur, lieu: doc.meta.lieu } });
+        res = await archiveEtEnvoyer({
+          client: doc.client, docType: doc.type, fileName: pdf.fileName, dataUrl: pdf.dataUrl, meta,
+          email: { to: emailDraft.to, sujet: emailDraft.sujet, corps: emailDraft.corps },
+          boutique: { nom: doc.boutique?.nom }, tutoiement,
+        });
       } catch (e) {
         res = { ok: false, error: String(e) };
       }
       const archiveOk = !!res?.ok;
-      if (archiveOk) {
-        if (res.clientId && res.clientId !== doc.client.id) actions.setClient({ ...doc.client, id: res.clientId });
-      } else {
-        downloadBlob(pdf.blob, pdf.fileName); // ne jamais perdre le document
-      }
+      if (archiveOk && res.clientId && res.clientId !== doc.client.id) actions.setClient({ ...doc.client, id: res.clientId });
+      if (!archiveOk) downloadBlob(pdf.blob, pdf.fileName); // ne jamais perdre le document
       URL.revokeObjectURL(pdf.url);
 
-      if (mode === 'archive') {
-        if (archiveOk) {
-          toast(res.created ? 'Archivé — nouveau dossier créé pour la cliente.' : 'Archivé dans le dossier de la cliente.', { duration: 9000, action: res.fileUrl ? { label: 'Ouvrir le PDF', onClick: () => window.open(res.fileUrl, '_blank') } : undefined });
-        } else {
-          toast(`Archivage impossible : le PDF a été téléchargé sur cet ordinateur (${pdf.fileName}). Gardez-le, puis réessayez plus tard.`, { type: 'error', duration: 15000 });
-        }
-        setResult({ mode, archiveOk });
-        return;
+      if (archiveOk && res.envoiStatut === 'envoye') {
+        toast(`E-mail envoyé automatiquement à ${emailDraft.to || 'la cliente'}.`, { duration: 9000, action: res.fileUrl ? { label: 'Ouvrir le PDF', onClick: () => window.open(res.fileUrl, '_blank') } : undefined });
+        setResult({ mode, archiveOk, auto: true, sent: true, fileUrl: res.fileUrl, folderUrl: res.folderUrl, fileName: pdf.fileName });
+      } else if (archiveOk && res.envoiStatut === 'en_attente') {
+        toast('Archivé — e-mail en attente de votre validation (Réglages → Envois en attente).', { duration: 11000 });
+        setResult({ mode, archiveOk, auto: true, pending: true, fileUrl: res.fileUrl, folderUrl: res.folderUrl, fileName: pdf.fileName });
+      } else {
+        // Envoi automatique indisponible (serveur non configuré, erreur réseau…) : repli manuel.
+        const mailUrl = gmailComposeUrl(buildEmail({ doc, fileUrl: res?.fileUrl, folderUrl: res?.folderUrl, fileName: pdf.fileName, tutoiement, archiveOk }));
+        window.open(mailUrl, '_blank');
+        toast(`Envoi automatique indisponible${res?.error ? ` (${res.error})` : ''} : Gmail ouvert pour un envoi manuel.`, { type: 'warning', duration: 13000 });
+        setResult({ mode, archiveOk, auto: false, mailUrl, fileUrl: res?.fileUrl, folderUrl: res?.folderUrl, fileName: pdf.fileName, error: res?.error });
       }
-      const mailUrl = gmailComposeUrl(buildEmail({ doc, fileUrl: res?.fileUrl, folderUrl: res?.folderUrl, fileName: pdf.fileName, tutoiement, archiveOk }));
-      window.open(mailUrl, '_blank');
-      setResult({ mode, archiveOk, mailUrl, fileUrl: res?.fileUrl, folderUrl: res?.folderUrl, fileName: pdf.fileName, error: res?.error });
     } catch (e) {
       console.error(e);
       toast(`Génération du PDF impossible : ${e?.message || e}`, { type: 'error', duration: 10000 });
@@ -237,7 +266,13 @@ function ComposeStep({ doc }) {
       <Modal
         open={!!result}
         onClose={() => setResult(null)}
-        title={result?.archiveOk ? (result.mode === 'send' ? 'Prêt à envoyer' : 'Document archivé') : 'Archivage impossible'}
+        title={
+          !result?.archiveOk ? 'Archivage impossible'
+          : result.mode === 'archive' ? 'Document archivé'
+          : result.sent ? 'E-mail envoyé'
+          : result.pending ? 'En attente de validation'
+          : 'Envoi manuel'
+        }
         actions={<><Button variant="ghost" onClick={() => setResult(null)}>Continuer à modifier</Button><Button variant="primary" icon="fa-solid fa-plus" onClick={restartAfter}>Nouveau document</Button></>}
       >
         <div className="stack">
@@ -246,9 +281,17 @@ function ComposeStep({ doc }) {
               Le document n’a pas pu être archivé dans le dossier de la cliente{result.error ? ` (${result.error})` : ''}. Le PDF a été <strong>téléchargé sur cet ordinateur</strong> (dossier Téléchargements) : rien n’est perdu.
             </Notice>
           )}
-          {result?.mode === 'send' && (
+          {result?.mode === 'send' && result.sent && (
+            <p className="small">Le PDF est parti par e-mail à la cliente, pièce jointe comprise — rien à faire de plus.</p>
+          )}
+          {result?.mode === 'send' && result.pending && (
+            <Notice tone="sage" icon="fa-regular fa-clock">
+              Document archivé. L’e-mail attend votre validation dans <strong>Réglages → Envois en attente</strong> avant de partir (option « je valide chaque envoi »).
+            </Notice>
+          )}
+          {result?.mode === 'send' && result.auto === false && (
             <>
-              <p className="small">Gmail s’est ouvert dans un nouvel onglet. Glissez le PDF <strong>{result.fileName}</strong> {result.archiveOk ? 'depuis le dossier archivé' : 'depuis vos Téléchargements'} en pièce jointe.</p>
+              <p className="small">Envoi automatique indisponible{result.error ? ` (${result.error})` : ''}. Gmail s’est ouvert dans un nouvel onglet. Glissez le PDF <strong>{result.fileName}</strong> {result.archiveOk ? 'depuis le dossier archivé' : 'depuis vos Téléchargements'} en pièce jointe.</p>
               <a className="btn btn-accent" href={result.mailUrl} target="_blank" rel="noreferrer"><i className="fa-regular fa-envelope" /> Rouvrir Gmail</a>
             </>
           )}

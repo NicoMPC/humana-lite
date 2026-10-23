@@ -4,6 +4,7 @@ import { answerIsFilled } from '../../store/selectors';
 import { QUESTIONS_DEMO as QUESTIONS } from '../../data/questions';
 import { Button, Field, Input, Switch, Textarea } from '../ui';
 import { RoutineBuilder } from '../diagnostic/RoutineBuilder';
+import { RoutineBuilderCheveux } from '../diagnostic/RoutineBuilderCheveux';
 
 const BOUTIQUE_FIELDS = [
   ['nom', 'Nom'], ['slogan', 'Slogan'], ['adresse', 'Adresse'], ['telephone', 'Téléphone'],
@@ -43,7 +44,10 @@ function BlockEditor({ block, doc, actions }) {
 
   switch (block.kind) {
     case 'routine':
-      return <RoutineBuilder type={doc.type} items={block.data.items || []} onChange={(items) => set({ items })} />;
+      // cheveux : 7 rubriques réelles V1 (voir docs/CONTRACT.md) · peau : grille réelle non reçue, modèle historique matin/soir/hebdo.
+      return doc.type === 'cheveux'
+        ? <RoutineBuilderCheveux data={block.data} onChange={set} />
+        : <RoutineBuilder type={doc.type} items={block.data.items || []} onChange={(items) => set({ items })} />;
     case 'conseils':
       return (
         <Field hint="Apparaît dans la section « Conseils » du PDF.">
