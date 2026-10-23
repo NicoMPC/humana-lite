@@ -1,0 +1,256 @@
+/**
+ * Hu'mana Lite — backend Google Apps Script lié au classeur.
+ *
+ * Rôle unique : archiver les PDF produits par l'appli (fiches conseil) dans
+ * Google Drive, un sous-dossier par cliente, et tenir un index dans le Sheet.
+ * Aucune fonction d'envoi d'e-mail ici (volontairement).
+ *
+ * Projet Apps Script AUTONOME (pas celui de la boutique) : il ouvre le
+ * classeur partagé par id (SPREADSHEET_ID) mais n'utilise que ses propres
+ * onglets, créés automatiquement s'ils manquent. Il ne lit ni n'écrit jamais
+ * Clientes / Diagnostics / Produits / Settings (onglets de la boutique) :
+ *   ArchClientes  : id | cle | prenom | nom | email | folderUrl | date_creation | json
+ *   ArchDocuments : id | client_id | type | date | auteur | url | nom | json
+ * La colonne "json" fait foi ; les autres colonnes sont là pour un coup d'oeil.
+ *
+ * Sécurité : toute requête (GET ou POST) doit porter le `token`, comparé à la
+ * Script Property TOKEN. POST en text/plain (évite le préflight CORS), corps
+ * JSON : { token, action, payload }.
+ *
+ * Déploiement : Nouveau projet script.google.com (autonome) > coller ce fichier
+ * (ou Code.min.js en plusieurs morceaux) > Paramètres du projet > Propriétés du script >
+ * TOKEN = <nouveau token, identique à LITE_TOKEN de src/lib/sheetsSync.js> >
+ * Déployer > Nouveau déploiement > Application
+ * Web > Exécuter en tant que "Moi" > Accès "Tout le monde". Au premier
+ * lancement, autoriser les accès Drive et Sheets.
+ *
+ * Actions : GET  pull -> { ok, clients, documents } ; GET ping -> { ok }
+ *           POST archivePdf -> { ok, clientId, folderUrl, fileUrl, created }
+ */
+
+const SPREADSHEET_ID = '1SrQZBSWigFrw3H62_j56iRowGgWXOFfJZGMZG2UO83U';
+const SHEETS = { clients: 'ArchClientes', documents: 'ArchDocuments' };
+const HEADERS = {
+  ArchClientes: ['id', 'cle', 'prenom', 'nom', 'email', 'folderUrl', 'date_creation', 'json'],
+  ArchDocuments: ['id', 'client_id', 'type', 'date', 'auteur', 'url', 'nom', 'json'],
+};
+const ROOT_FOLDER_NAME = "Archives Hu'mana";
+const MAX_BASE64_LENGTH = 35 * 1024 * 1024;
+
+function getToken_() {
+  return PropertiesService.getScriptProperties().getProperty('TOKEN');
+}
+
+function checkToken_(token) {
+  const expected = getToken_();
+  if (!expected || token !== expected) throw new Error('Token invalide');
+}
+
+function json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function errMsg_(err) {
+  return String((err && err.message) || err).replace(/^Error:\s*/, '');
+}
+
+/** Renvoie l'onglet, le crée avec ses en-têtes s'il manque, ajoute les colonnes manquantes. */
+function sheet_(name) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const wanted = HEADERS[name];
+  let sh = ss.getSheetByName(name);
+  if (!sh) {
+    sh = ss.insertSheet(name);
+    sh.getRange(1, 1, 1, wanted.length).setValues([wanted]);
+    sh.setFrozenRows(1);
+    return sh;
+  }
+  const lastCol = Math.max(sh.getLastColumn(), 1);
+  const header = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+  if (header.every((h) => h === '')) {
+    sh.getRange(1, 1, 1, wanted.length).setValues([wanted]);
+    return sh;
+  }
+  wanted.forEach((h) => {
+    if (header.indexOf(h) === -1) {
+      sh.getRange(1, header.length + 1).setValue(h);
+      header.push(h);
+    }
+  });
+  return sh;
+}
+
+/** Lit toutes les lignes d'un onglet et renvoie les objets JSON parsés (colonne "json"). */
+function readAll_(name) {
+  const sh = sheet_(name);
+  const values = sh.getDataRange().getValues();
+  const header = values[0] || [];
+  const jsonCol = header.indexOf('json');
+  const out = [];
+  if (jsonCol === -1) return out;
+  for (let i = 1; i < values.length; i++) {
+    const raw = values[i][jsonCol];
+    if (!raw) continue;
+    try { out.push(JSON.parse(raw)); } catch (e) { /* ligne corrompue, ignorée */ }
+  }
+  return out;
+}
+
+/** Insère ou met à jour une ligne par id ; colonnes lisibles selon readableCols, json = objet complet. */
+function upsert_(name, obj, readableCols) {
+  const sh = sheet_(name);
+  const values = sh.getDataRange().getValues();
+  const header = values[0] || [];
+  const idCol = header.indexOf('id');
+  let rowIndex = -1;
+  for (let i = 1; i < values.length; i++) {
+    if (values[i][idCol] === obj.id) { rowIndex = i + 1; break; }
+  }
+  const row = header.map((h) => {
+    if (h === 'id') return obj.id;
+    if (h === 'json') return JSON.stringify(obj);
+    return readableCols[h] != null ? readableCols[h] : '';
+  });
+  if (rowIndex === -1) {
+    sh.appendRow(row);
+  } else {
+    sh.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  }
+}
+
+/** Clé cliente : nom + prénom, minuscules, sans accents, espaces réduits. */
+function normalize_(s) {
+  return String(s == null ? '' : s)
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function clientKey_(prenom, nom) {
+  return normalize_(nom) + '|' + normalize_(prenom);
+}
+
+function cleanName_(s) {
+  return String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+}
+
+function uid_(prefix) {
+  return prefix + '_' + Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+}
+
+function safeFileName_(s) {
+  const n = String(s || '').replace(/[\\/:*?"<>|\r\n]+/g, '_').trim();
+  return n || 'document.pdf';
+}
+
+function getRootFolder_() {
+  const it = DriveApp.getFoldersByName(ROOT_FOLDER_NAME);
+  if (it.hasNext()) return it.next();
+  return DriveApp.createFolder(ROOT_FOLDER_NAME);
+}
+
+/** Sous-dossier "Nom Prénom" du dossier racine (réutilisé s'il existe déjà). */
+function getClientFolder_(root, label) {
+  const it = root.getFoldersByName(label);
+  if (it.hasNext()) return it.next();
+  return root.createFolder(label);
+}
+
+/** payload: { client:{id?,prenom,nom,email?}, docType, fileName, dataUrl, meta:{date,auteur,lieu} } */
+function archivePdf_(p) {
+  if (!p || typeof p !== 'object') throw new Error('Requête vide');
+  const c = p.client || {};
+  const prenom = cleanName_(c.prenom);
+  const nom = cleanName_(c.nom);
+  if (!prenom) throw new Error('Prénom manquant');
+  if (!nom) throw new Error('Nom manquant');
+  const m = /^data:([^;,]+)?(?:;[^;,]+)*;base64,(.+)$/.exec(String(p.dataUrl || ''));
+  if (!m) throw new Error('dataUrl invalide (base64 attendu)');
+  if (m[2].length > MAX_BASE64_LENGTH) throw new Error('PDF trop volumineux');
+  if (m[1] && m[1].indexOf('pdf') === -1) throw new Error('Le fichier doit être un PDF');
+  const meta = p.meta || {};
+  const docType = String(p.docType || '').trim() || 'document';
+  const fileName = safeFileName_(p.fileName || (docType + '.pdf'));
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const key = clientKey_(prenom, nom);
+    const clients = readAll_(SHEETS.clients);
+    let client = clients.find((x) => x && x.cle === key);
+    let created = false;
+    let folder = null;
+
+    if (client && client.folderId) {
+      try { folder = DriveApp.getFolderById(client.folderId); if (folder.isTrashed()) folder = null; } catch (e) { folder = null; }
+    }
+    if (!folder) folder = getClientFolder_(getRootFolder_(), nom + ' ' + prenom);
+
+    if (!client) {
+      created = true;
+      let id = cleanName_(c.id);
+      if (!id || clients.some((x) => x && x.id === id)) id = uid_('cli');
+      client = { id, prenom, nom, email: cleanName_(c.email), cle: key, date_creation: new Date().toISOString() };
+    } else if (!client.email && c.email) {
+      client.email = cleanName_(c.email);
+    }
+    client.folderId = folder.getId();
+    client.folderUrl = folder.getUrl();
+    upsert_(SHEETS.clients, client, {
+      prenom: client.prenom, nom: client.nom, email: client.email || '',
+      date_creation: client.date_creation || '', cle: client.cle, folderUrl: client.folderUrl,
+    });
+
+    const blob = Utilities.newBlob(Utilities.base64Decode(m[2]), 'application/pdf', fileName);
+    const file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    const fileUrl = file.getUrl();
+
+    const doc = {
+      id: uid_('doc'), client_id: client.id, type: docType, date: String(meta.date || '').slice(0, 10),
+      auteur: cleanName_(meta.auteur), lieu: cleanName_(meta.lieu), url: fileUrl, nom: fileName, fileId: file.getId(),
+    };
+    upsert_(SHEETS.documents, doc, {
+      client_id: doc.client_id, type: doc.type, date: doc.date, auteur: doc.auteur, url: doc.url, nom: doc.nom,
+    });
+    SpreadsheetApp.flush();
+    return { clientId: client.id, folderUrl: client.folderUrl, fileUrl, created };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function doGet(e) {
+  try {
+    const params = (e && e.parameter) || {};
+    checkToken_(params.token);
+    const action = params.action || 'pull';
+    if (action === 'ping') return json_({ ok: true, pong: true });
+    if (action === 'pull') {
+      return json_({ ok: true, clients: readAll_(SHEETS.clients), documents: readAll_(SHEETS.documents) });
+    }
+    return json_({ ok: false, error: 'Action inconnue : ' + action });
+  } catch (err) {
+    return json_({ ok: false, error: errMsg_(err) });
+  }
+}
+
+function doPost(e) {
+  try {
+    let body;
+    try { body = JSON.parse((e && e.postData && e.postData.contents) || ''); } catch (x) { throw new Error('Corps JSON invalide'); }
+    checkToken_(body.token);
+    const action = body.action;
+    const payload = body.payload;
+    switch (action) {
+      case 'archivePdf':
+        return json_(Object.assign({ ok: true }, archivePdf_(payload)));
+      default:
+        return json_({ ok: false, error: 'Action inconnue : ' + action });
+    }
+  } catch (err) {
+    return json_({ ok: false, error: errMsg_(err) });
+  }
+}

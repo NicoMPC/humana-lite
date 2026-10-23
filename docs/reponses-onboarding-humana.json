@@ -1,0 +1,56 @@
+{
+ "complete": true,
+ "locked": true,
+ "step": 26,
+ "reponses": {
+  "delai_photos_semaines": 6,
+  "delai_relance_jours": 14,
+  "relance_anticipee_ok": false,
+  "plusieurs_diag_meme_type_ok": true,
+  "besoin_photos": true,
+  "besoin_notes_libres": true,
+  "modalites": [
+   "visio",
+   "boutique"
+  ],
+  "telephone_obligatoire": true,
+  "champs_stricts_ok": true,
+  "stock_rappel_semaines": 1,
+  "signature": "L’équipe HU\"MANA",
+  "nb_pdf_ok": true,
+  "nb_pdf_incertain": false,
+  "pdf_routine_remarque": "Oui, Il manque la rubrique hebdomadaire. \n\nL'entête pourrait être un peu plus esthétique,\n\nle rectangle en bas de page est trop gros. ",
+  "pdf_lifestyle_remarque": "Parfait, \n\nmême remarques visuelles que la routine visage ",
+  "lifestyle_contenu_ok": false,
+  "lifestyle_contenu_incertain": false,
+  "lifestyle_texte_libre": true,
+  "lifestyle_remarque": "J'aimerais pouvoir modifier et ajouter des conseils en autonomie",
+  "lifestyle_envoi_mode": "ensemble",
+  "questions_diag_ok": false,
+  "questions_diag_incertain": false,
+  "questions_diag_remarque": "Nous t'enverrons un PDF détaillé avec toutes les questions. Voici déjà la trame cheveux, nous complèterons avec la trame visage dès que possible",
+  "pieces_jointes_diag": [
+   {
+    "nom": "HUMANA_Cahier_des_charges_Fiche_cliente_Diagnostic_capillaire_V1.pdf",
+    "url": "https://drive.google.com/uc?id=1Oh3T_V3f5_PFW1a1QDbmhaCjnTNZFCOI"
+   }
+  ],
+  "texte_libre_diag": "chaque_question",
+  "self_edit_mode": "moi_meme",
+  "champs_stricts_incertain": false,
+  "relance_texte_remarque": "Bonjour [Prénom]\n\nCela fait déjà 14 jours depuis votre DIAG HU''MANA et nous voulions prendre de vos\n\nnouvelles\n\nComment se passe votre nouvelle routine ?\n\n- Arrivez-vous à la suivre facilement ?\n\n- Comment votre peau / vos cheveux réagissent-ils ?\n\n- Avez-vous déjà remarqué une évolution, même légère ?\n\n- Y a-t-il un produit, une étape ou une fréquence qui vous pose difficulté ?\n\n- Êtes-vous satisfaite et prenez-vous plaisir à utiliser votre routine ?\n\n- Avez-vous des questions ou quelque chose que vous aimeriez ajuster ?\n\nVous pouvez simplement nous répondre par SMS. Et si vous préférez en parler de vive\n\nvoix, nous pouvons aussi vous proposer un petit appel de suivi\n\nÀ très vite,\n\nL'équipe HU''MANA",
+  "envoi_mode": "auto",
+  "envoi_apercu": true,
+  "tutoiement_mode": "depend",
+  "tutoiement": false,
+  "tutoiement_remarque": "au feeling ",
+  "templates_incertain": true,
+  "remarque_finale": "La fiche de diag cheveux est trés diffèrente de la fiche visage, attention. Il nous faudra intégrer égallement intégrer les questions lifestyle aux deux diagnostique dans un onglet spécifique en fin de questionnaire. ",
+  "pieces_jointes_finales": [
+   {
+    "nom": "HUMANA_Fiche_Routine_Construction_Bibliotheque_Maquette_V1.pdf",
+    "url": "https://drive.google.com/uc?id=1tHg7JLXJ35vwuBeGds3YdWHP3wAx4DvT"
+   }
+  ]
+ }
+}
