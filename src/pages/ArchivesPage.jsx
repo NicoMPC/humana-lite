@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { pullArchives } from '../lib/sheetsSync';
+import { pullArchives, pullRelances, pullEnvoisEnAttente, modifierRelance } from '../lib/sheetsSync';
 import { normalize } from '../lib/format';
 import { formatDate } from '../lib/dates';
-import { Avatar, Badge, Button, EmptyState, Notice, SearchBar, SkeletonCard } from '../components/ui';
+import { toast } from '../store/useUI';
+import { Avatar, Badge, Button, EmptyState, Field, Input, Modal, Notice, SearchBar, SkeletonCard, Textarea } from '../components/ui';
 
 const TYPE_LABELS = { peau: 'Peau', cheveux: 'Cheveux', lifestyle: 'Lifestyle' };
 const typeLabel = (t) => TYPE_LABELS[String(t || '').toLowerCase()] || t || 'Document';
@@ -13,31 +14,54 @@ function dateLabel(iso) {
   try { return formatDate(String(iso).slice(0, 10)); } catch { return String(iso); }
 }
 
+/** Regroupe une liste par client_id, triée du plus récent au plus ancien selon `dateKey`. */
+function groupByClient(list, dateKey) {
+  const map = new Map();
+  list.forEach((x) => {
+    if (!x || !x.client_id) return;
+    if (!map.has(x.client_id)) map.set(x.client_id, []);
+    map.get(x.client_id).push(x);
+  });
+  map.forEach((l) => l.sort((a, b) => String(b[dateKey] || '').localeCompare(String(a[dateKey] || ''))));
+  return map;
+}
+
 export default function ArchivesPage() {
-  const [state, setState] = useState({ status: 'loading', clients: [], documents: [], error: '' });
+  const [state, setState] = useState({ status: 'loading', clients: [], documents: [], relances: [], pendingEnvois: [], error: '' });
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState(null);
+  const [editing, setEditing] = useState(null); // relance en cours d'édition, ou null
 
   const load = useCallback(async () => {
     setState((s) => ({ ...s, status: 'loading', error: '' }));
-    const res = await pullArchives();
-    if (res.ok) setState({ status: 'ready', clients: res.clients, documents: res.documents, error: '' });
-    else setState({ status: 'error', clients: [], documents: [], error: res.error || 'Erreur inconnue' });
+    const [archives, relancesRes, pendingRes] = await Promise.all([pullArchives(), pullRelances(), pullEnvoisEnAttente()]);
+    if (archives.ok) {
+      setState({
+        status: 'ready', clients: archives.clients, documents: archives.documents,
+        relances: relancesRes.ok ? relancesRes.relances : [], pendingEnvois: pendingRes.ok ? pendingRes.envois : [], error: '',
+      });
+    } else {
+      setState({ status: 'error', clients: [], documents: [], relances: [], pendingEnvois: [], error: archives.error || 'Erreur inconnue' });
+    }
+  }, []);
+
+  /** Recharge juste relances + envois en attente (après édition), sans re-tirer tous les documents. */
+  const reloadMails = useCallback(async () => {
+    const [relancesRes, pendingRes] = await Promise.all([pullRelances(), pullEnvoisEnAttente()]);
+    setState((s) => ({
+      ...s,
+      relances: relancesRes.ok ? relancesRes.relances : s.relances,
+      pendingEnvois: pendingRes.ok ? pendingRes.envois : s.pendingEnvois,
+    }));
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  const { clients, documents, status, error } = state;
+  const { clients, documents, relances, pendingEnvois, status, error } = state;
 
-  const docsByClient = useMemo(() => {
-    const map = new Map();
-    documents.forEach((d) => {
-      if (!map.has(d.client_id)) map.set(d.client_id, []);
-      map.get(d.client_id).push(d);
-    });
-    map.forEach((list) => list.sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))));
-    return map;
-  }, [documents]);
+  const docsByClient = useMemo(() => groupByClient(documents, 'date'), [documents]);
+  const relancesByClient = useMemo(() => groupByClient(relances, 'date_relance_prevue'), [relances]);
+  const pendingByClient = useMemo(() => groupByClient(pendingEnvois, 'date_creation'), [pendingEnvois]);
 
   const filtered = useMemo(() => {
     const q = normalize(search);
@@ -48,6 +72,21 @@ export default function ArchivesPage() {
 
   const selected = clients.find((c) => c.id === selectedId) || null;
   const selectedDocs = selected ? docsByClient.get(selected.id) || [] : [];
+  const selectedRelances = selected ? relancesByClient.get(selected.id) || [] : [];
+  const selectedPending = selected ? pendingByClient.get(selected.id) || [] : [];
+
+  // Mails envoyés : envoi initial (documents archivés, déjà listés ci-dessus) + relances déjà parties.
+  const mailsEnvoyes = [
+    ...selectedDocs.map((d) => ({ id: d.id, date: d.date, auteur: d.auteur, label: `${typeLabel(d.type)} (envoi initial)` })),
+    ...selectedRelances.filter((r) => r.statut === 'envoyee').map((r) => ({ id: r.id, date: r.date_relance_prevue, auteur: r.auteur, label: 'Relance' })),
+  ].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+
+  // Mails à venir : relances programmées (éditables jusqu'à J-1) + envois en attente de validation (option C).
+  const relancesAVenir = selectedRelances.filter((r) => r.statut === 'en_attente').sort((a, b) => String(a.date_relance_prevue || '').localeCompare(String(b.date_relance_prevue || '')));
+  const pendingAVenir = selectedPending.filter((p) => p.statut === 'en_attente');
+
+  const openEdit = (r) => setEditing({ id: r.id, sujet: r.sujet || '', corps: r.corps || '', prenom: r.prenom });
+  const closeEdit = () => setEditing(null);
 
   return (
     <>
@@ -147,11 +186,102 @@ export default function ArchivesPage() {
                     )}
                   </div>
                 ))}
+
+                <div className="divider" />
+                <h4>Mails envoyés</h4>
+                {mailsEnvoyes.length === 0 && <p className="small muted">Aucun mail envoyé pour l’instant.</p>}
+                {mailsEnvoyes.map((m) => (
+                  <div key={m.id} className="subtle-card flex between">
+                    <div className="grow">
+                      <div className="flex wrap" style={{ gap: '.5rem' }}>
+                        <Badge tone="sage">{m.label}</Badge>
+                        <span className="small semibold">{dateLabel(m.date)}</span>
+                      </div>
+                      <div className="small muted truncate">{m.auteur ? `par ${m.auteur}` : '—'}</div>
+                    </div>
+                  </div>
+                ))}
+
+                <div className="divider" />
+                <h4>Mails à venir</h4>
+                {relancesAVenir.length === 0 && pendingAVenir.length === 0 && <p className="small muted">Rien de programmé pour l’instant.</p>}
+                {relancesAVenir.map((r) => (
+                  <div key={r.id} className="subtle-card flex between">
+                    <div className="grow">
+                      <div className="flex wrap" style={{ gap: '.5rem' }}>
+                        <Badge tone="clay">Relance</Badge>
+                        <span className="small semibold">{dateLabel(r.date_relance_prevue)}</span>
+                        {r.modifie && <Badge tone="ink" outline>Personnalisée</Badge>}
+                      </div>
+                      <div className="small muted truncate">{r.auteur ? `programmée par ${r.auteur}` : 'Programmée automatiquement'}</div>
+                      <div className="small muted truncate" title={r.sujet}>{r.sujet}</div>
+                    </div>
+                    {r.editable ? (
+                      <Button size="sm" variant="soft" icon="fa-solid fa-pen" onClick={() => openEdit(r)}>Modifier</Button>
+                    ) : (
+                      <Badge tone="amber" outline>Part aujourd’hui — plus modifiable</Badge>
+                    )}
+                  </div>
+                ))}
+                {pendingAVenir.map((p) => (
+                  <div key={p.id} className="subtle-card flex between">
+                    <div className="grow">
+                      <div className="flex wrap" style={{ gap: '.5rem' }}>
+                        <Badge tone="gold">En attente de validation</Badge>
+                      </div>
+                      <div className="small muted truncate">{p.prenom ? `pour ${p.prenom}` : ''}</div>
+                      <div className="small muted truncate" title={p.sujet}>{p.sujet}</div>
+                    </div>
+                    <span className="small muted">À valider dans Réglages</span>
+                  </div>
+                ))}
               </div>
             )}
           </aside>
         </div>
       )}
+
+      <EditRelanceModal editing={editing} onClose={closeEdit} onSaved={reloadMails} />
     </>
+  );
+}
+
+/** Modale d'édition d'une relance à venir : sujet + corps, pré-remplis du brouillon par défaut. */
+function EditRelanceModal({ editing, onClose, onSaved }) {
+  const [draft, setDraft] = useState({ sujet: '', corps: '' });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { if (editing) setDraft({ sujet: editing.sujet, corps: editing.corps }); }, [editing]);
+
+  const save = async () => {
+    setSaving(true);
+    const res = await modifierRelance(editing.id, draft);
+    setSaving(false);
+    if (res.ok) {
+      toast('Relance mise à jour.');
+      onSaved();
+      onClose();
+    } else {
+      toast(`Modification impossible : ${res.error || 'erreur inconnue'}`, { type: 'error' });
+    }
+  };
+
+  return (
+    <Modal
+      open={!!editing}
+      onClose={onClose}
+      title={editing ? `Modifier la relance — ${editing.prenom || ''}` : ''}
+      subtitle="Texte brut uniquement (pas de mise en forme) — laissez tel quel si le message par défaut convient."
+      actions={<><Button variant="ghost" onClick={onClose}>Annuler</Button><Button variant="primary" icon="fa-solid fa-check" loading={saving} disabled={saving} onClick={save}>Enregistrer</Button></>}
+    >
+      {editing && (
+        <div className="stack">
+          <Field label="Sujet">{(id) => <Input id={id} value={draft.sujet} onChange={(e) => setDraft((d) => ({ ...d, sujet: e.target.value }))} autoFocus />}</Field>
+          <Field label="Corps du mail" hint="Texte brut — aucune mise en forme, aucun logo.">
+            {(id) => <Textarea id={id} rows={12} value={draft.corps} onChange={(e) => setDraft((d) => ({ ...d, corps: e.target.value }))} />}
+          </Field>
+        </div>
+      )}
+    </Modal>
   );
 }

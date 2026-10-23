@@ -84,6 +84,15 @@ parti, l'e-mail attend un clic humain.
 `getReglagesEnvoi() → Promise<{ ok, validationAvantEnvoi:boolean }>`
 `setValidationAvantEnvoi(bool) → Promise<{ ok, validationAvantEnvoi }>` — réglage global (pas par cliente), exposé dans `pages/ReglagesPage.jsx`.
 
+### Fiche cliente : historique des mails + relance personnalisable (23/10/2026)
+`pullRelances() → Promise<{ ok, relances:[{id,client_id,email,prenom,date_envoi_diag,date_relance_prevue,statut,auteur,sujet,corps,modifie,boutiqueNom,tutoiement,editable:boolean}] }>`
+— toutes les relances (historique + à venir), pas seulement celles en attente. `editable` (calculé serveur) : vrai
+seulement si `statut:'en_attente'` ET la date prévue n'est pas encore atteinte (modifiable jusqu'à J-1 inclus,
+verrouillé le jour même de l'envoi).
+`modifierRelance(id, { sujet, corps }) → Promise<{ ok }>` — édite le brouillon d'une relance pas encore partie ;
+rejeté (`{ ok:false, error }`) si `editable` est déjà faux côté serveur (règle J-1 revérifiée à l'écriture, pas
+seulement affichée côté appli).
+
 Toutes ces fonctions suivent le pattern existant : jamais d'exception, toujours `{ ok, ... }` ou `{ ok:false, error }`.
 Déploiement manuel requis côté Apps Script (scopes Gmail/Agenda à autoriser + `installerDeclencheurs_()` à exécuter
 une fois) : voir l'en-tête de `apps-script/Code.gs`.

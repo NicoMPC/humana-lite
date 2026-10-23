@@ -14,8 +14,11 @@
  * Clientes / Diagnostics / Produits / Settings (onglets de la boutique) :
  *   ArchClientes  : id | cle | prenom | nom | email | folderUrl | date_creation | json
  *   ArchDocuments : id | client_id | type | date | auteur | url | nom | json
- *   EnvoisEnAttente : id | client_id | email | prenom | sujet | date_creation | statut | json
- *   RelanceQueue  : id | client_id | email | prenom | date_envoi_diag | date_relance_prevue | statut | json
+ *   EnvoisEnAttente : id | client_id | email | prenom | sujet | date_creation | statut | auteur | json
+ *     (json ajoute : corps, fileId, fileUrl, fileName, boutiqueNom, tutoiement)
+ *   RelanceQueue  : id | client_id | email | prenom | date_envoi_diag | date_relance_prevue | statut | auteur | json
+ *     (json ajoute : nom, boutiqueNom, tutoiement, sujet, corps — brouillon généré à la
+ *     programmation, éditable jusqu'à J-1 —, modifie:boolean)
  * La colonne "json" fait foi ; les autres colonnes sont là pour un coup d'oeil.
  *
  * Sécurité : toute requête (GET ou POST) doit porter le `token`, comparé à la
@@ -36,11 +39,13 @@
  *           GET  ping -> { ok }
  *           GET  getReglages -> { ok, validationAvantEnvoi }
  *           GET  pullEnvoisEnAttente -> { ok, envois }
+ *           GET  pullRelances -> { ok, relances }  (historique + à venir, champ calculé `editable`)
  *           POST archivePdf -> { ok, clientId, folderUrl, fileUrl, fileId, created }
  *           POST archiveEtEnvoyer -> { ok, clientId, folderUrl, fileUrl, fileId, created, envoiStatut }
  *           POST validerEnvoi -> { ok }
  *           POST annulerEnvoi -> { ok }
  *           POST definirValidationAvantEnvoi -> { ok, validationAvantEnvoi }
+ *           POST modifierRelance -> { ok } ou { ok:false, error }  (sujet/corps, verrouillé à J-1)
  */
 
 const SPREADSHEET_ID = '1SrQZBSWigFrw3H62_j56iRowGgWXOFfJZGMZG2UO83U';
@@ -53,8 +58,8 @@ const SHEETS = {
 const HEADERS = {
   ArchClientes: ['id', 'cle', 'prenom', 'nom', 'email', 'folderUrl', 'date_creation', 'json'],
   ArchDocuments: ['id', 'client_id', 'type', 'date', 'auteur', 'url', 'nom', 'json'],
-  EnvoisEnAttente: ['id', 'client_id', 'email', 'prenom', 'sujet', 'date_creation', 'statut', 'json'],
-  RelanceQueue: ['id', 'client_id', 'email', 'prenom', 'date_envoi_diag', 'date_relance_prevue', 'statut', 'json'],
+  EnvoisEnAttente: ['id', 'client_id', 'email', 'prenom', 'sujet', 'date_creation', 'statut', 'auteur', 'json'],
+  RelanceQueue: ['id', 'client_id', 'email', 'prenom', 'date_envoi_diag', 'date_relance_prevue', 'statut', 'auteur', 'json'],
 };
 const ROOT_FOLDER_NAME = "Archives Hu'mana";
 const MAX_BASE64_LENGTH = 35 * 1024 * 1024;
@@ -350,8 +355,16 @@ function texteRelance_(prenom, tutoiement, boutiqueNom) {
     .replace('{signature}', signature);
 }
 
-/** Programme la relance J+14 pour ce client (une ligne par envoi initial/validé). */
-function programmerRelance_(client, boutiqueNom, tutoiement) {
+function sujetRelance_(boutiqueNom) {
+  return 'Des nouvelles de votre routine — ' + (boutiqueNom || "Hu'mana");
+}
+
+/**
+ * Programme la relance J+14 pour ce client (une ligne par envoi initial/validé).
+ * Génère tout de suite le brouillon par défaut (sujet/corps) : c'est ce texte qui
+ * part tel quel à J+14, sauf si la praticienne l'édite avant (modifierRelance_, jusqu'à J-1).
+ */
+function programmerRelance_(client, boutiqueNom, tutoiement, auteur) {
   if (!client.email) return; // pas d'email, pas de relance possible
   const aujourdhui = ajourdhui_();
   const relance = {
@@ -365,10 +378,15 @@ function programmerRelance_(client, boutiqueNom, tutoiement) {
     date_envoi_diag: aujourdhui,
     date_relance_prevue: ajouterJours_(aujourdhui, RELANCE_DELAI_JOURS),
     statut: 'en_attente',
+    auteur: cleanName_(auteur),
+    sujet: sujetRelance_(boutiqueNom),
+    corps: texteRelance_(client.prenom, tutoiement, boutiqueNom),
+    modifie: false,
   };
   upsert_(SHEETS.relances, relance, {
     client_id: relance.client_id, email: relance.email, prenom: relance.prenom,
-    date_envoi_diag: relance.date_envoi_diag, date_relance_prevue: relance.date_relance_prevue, statut: relance.statut,
+    date_envoi_diag: relance.date_envoi_diag, date_relance_prevue: relance.date_relance_prevue,
+    statut: relance.statut, auteur: relance.auteur,
   });
 }
 
@@ -397,12 +415,13 @@ function archiveEtEnvoyer_(p) {
       fileName: p.fileName,
       boutiqueNom,
       tutoiement: !!p.tutoiement,
+      auteur: cleanName_((p.meta && p.meta.auteur) || ''),
       date_creation: new Date().toISOString(),
       statut: 'en_attente',
     };
     upsert_(SHEETS.pending, pending, {
       client_id: pending.client_id, email: pending.email, prenom: pending.prenom,
-      sujet: pending.sujet, date_creation: pending.date_creation, statut: pending.statut,
+      sujet: pending.sujet, date_creation: pending.date_creation, statut: pending.statut, auteur: pending.auteur,
     });
     SpreadsheetApp.flush();
     return { clientId: archive.clientId, folderUrl: archive.folderUrl, fileUrl: archive.fileUrl, fileId: archive.fileId, created: archive.created, envoiStatut: 'en_attente', pendingId: pending.id };
@@ -410,7 +429,7 @@ function archiveEtEnvoyer_(p) {
 
   envoyerMail_(email.to || client.email, email.sujet, email.corps, archive.fileId, boutiqueNom);
   creerTraceAgenda_("Envoi — " + client.prenom + ' ' + client.nom, 'PDF : ' + archive.fileUrl);
-  programmerRelance_(client, boutiqueNom, p.tutoiement);
+  programmerRelance_(client, boutiqueNom, p.tutoiement, (p.meta && p.meta.auteur) || '');
   SpreadsheetApp.flush();
   return { clientId: archive.clientId, folderUrl: archive.folderUrl, fileUrl: archive.fileUrl, fileId: archive.fileId, created: archive.created, envoiStatut: 'envoye' };
 }
@@ -431,12 +450,12 @@ function validerEnvoi_(id) {
     pending.statut = 'envoye';
     upsert_(SHEETS.pending, pending, {
       client_id: pending.client_id, email: pending.email, prenom: pending.prenom,
-      sujet: pending.sujet, date_creation: pending.date_creation, statut: pending.statut,
+      sujet: pending.sujet, date_creation: pending.date_creation, statut: pending.statut, auteur: pending.auteur || '',
     });
 
     const clients = readAll_(SHEETS.clients);
     const client = clients.find((x) => x && x.id === pending.client_id) || { id: pending.client_id, prenom: pending.prenom, nom: '', email: pending.email };
-    programmerRelance_(client, pending.boutiqueNom, pending.tutoiement);
+    programmerRelance_(client, pending.boutiqueNom, pending.tutoiement, pending.auteur);
     SpreadsheetApp.flush();
     return { ok: true };
   } finally {
@@ -453,7 +472,7 @@ function annulerEnvoi_(id) {
   pending.statut = 'annule';
   upsert_(SHEETS.pending, pending, {
     client_id: pending.client_id, email: pending.email, prenom: pending.prenom,
-    sujet: pending.sujet, date_creation: pending.date_creation, statut: pending.statut,
+    sujet: pending.sujet, date_creation: pending.date_creation, statut: pending.statut, auteur: pending.auteur || '',
   });
   SpreadsheetApp.flush();
   return { ok: true };
@@ -465,8 +484,57 @@ function listerEnvoisEnAttente_() {
 }
 
 /**
+ * Toutes les relances (historique + à venir, pour la fiche cliente côté appli) —
+ * contrairement à listerEnvoisEnAttente_, pas de filtre sur le statut.
+ * `editable` : calculé ici, jamais stocké — vrai seulement si la relance n'est
+ * pas encore partie ET que la date prévue n'est pas encore atteinte (règle J-1,
+ * voir modifierRelance_).
+ */
+function listerRelances_() {
+  const today = ajourdhui_();
+  return readAll_(SHEETS.relances).map((r) => Object.assign({}, r, {
+    editable: !!r && r.statut === 'en_attente' && today < String((r && r.date_relance_prevue) || ''),
+  }));
+}
+
+/**
+ * Édite le brouillon (sujet/corps) d'une relance pas encore partie, tant qu'on
+ * n'est pas encore au jour J de l'envoi prévu (modifiable jusqu'à J-1 inclus).
+ */
+function modifierRelance_(id, data) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    if (!id) throw new Error('Identifiant de relance manquant');
+    const relances = readAll_(SHEETS.relances);
+    const r = relances.find((x) => x && x.id === id);
+    if (!r) throw new Error('Relance introuvable');
+    if (r.statut !== 'en_attente') throw new Error('Cette relance a déjà été traitée.');
+    if (ajourdhui_() >= String(r.date_relance_prevue || '')) {
+      throw new Error('Cette relance part aujourd\'hui, elle n\'est plus modifiable.');
+    }
+    if (data && data.sujet != null) r.sujet = String(data.sujet);
+    if (data && data.corps != null) r.corps = String(data.corps);
+    r.modifie = true;
+    upsert_(SHEETS.relances, r, {
+      client_id: r.client_id, email: r.email, prenom: r.prenom,
+      date_envoi_diag: r.date_envoi_diag, date_relance_prevue: r.date_relance_prevue,
+      statut: r.statut, auteur: r.auteur || '',
+    });
+    SpreadsheetApp.flush();
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
  * Déclencheur quotidien (voir installerDeclencheurs_) : envoie chaque relance
  * dont la date prévue est atteinte, trace l'Agenda, puis marque la ligne.
+ * Envoie le texte STOCKÉ (sujet/corps écrits à la programmation, potentiellement
+ * édités par la praticienne via modifierRelance_) — jamais régénéré ici depuis
+ * le template ; le repli ci-dessous ne sert qu'aux lignes créées avant cette
+ * version, qui n'ont pas encore de brouillon stocké.
  */
 function verifierRelances_() {
   const lock = LockService.getScriptLock();
@@ -478,8 +546,8 @@ function verifierRelances_() {
       if (!r || r.statut !== 'en_attente') return;
       if (String(r.date_relance_prevue || '') > today) return;
       try {
-        const corps = texteRelance_(r.prenom, r.tutoiement, r.boutiqueNom);
-        const sujet = 'Des nouvelles de votre routine — ' + (r.boutiqueNom || "Hu'mana");
+        const sujet = r.sujet || sujetRelance_(r.boutiqueNom);
+        const corps = r.corps || texteRelance_(r.prenom, r.tutoiement, r.boutiqueNom);
         MailApp.sendEmail(r.email, sujet, corps, { name: r.boutiqueNom || "Hu'mana" });
         creerTraceAgenda_('Relance J+' + RELANCE_DELAI_JOURS + ' — ' + r.prenom, 'Relance automatique envoyée à ' + r.email);
         r.statut = 'envoyee';
@@ -488,7 +556,8 @@ function verifierRelances_() {
       }
       upsert_(SHEETS.relances, r, {
         client_id: r.client_id, email: r.email, prenom: r.prenom,
-        date_envoi_diag: r.date_envoi_diag, date_relance_prevue: r.date_relance_prevue, statut: r.statut,
+        date_envoi_diag: r.date_envoi_diag, date_relance_prevue: r.date_relance_prevue,
+        statut: r.statut, auteur: r.auteur || '',
       });
     });
     SpreadsheetApp.flush();
@@ -527,6 +596,9 @@ function doGet(e) {
     if (action === 'pullEnvoisEnAttente') {
       return json_({ ok: true, envois: listerEnvoisEnAttente_() });
     }
+    if (action === 'pullRelances') {
+      return json_({ ok: true, relances: listerRelances_() });
+    }
     return json_({ ok: false, error: 'Action inconnue : ' + action });
   } catch (err) {
     return json_({ ok: false, error: errMsg_(err) });
@@ -551,6 +623,8 @@ function doPost(e) {
         return json_(Object.assign({ ok: true }, annulerEnvoi_(payload && payload.id)));
       case 'definirValidationAvantEnvoi':
         return json_({ ok: true, validationAvantEnvoi: definirValidationAvantEnvoi_(!!(payload && payload.validationAvantEnvoi)) });
+      case 'modifierRelance':
+        return json_(modifierRelance_(payload && payload.id, payload));
       default:
         return json_({ ok: false, error: 'Action inconnue : ' + action });
     }

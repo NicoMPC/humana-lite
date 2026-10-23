@@ -139,6 +139,30 @@ export async function annulerEnvoi(id) {
   }
 }
 
+/** Toutes les relances (historique + à venir, pour la fiche cliente). -> { ok, relances } */
+export async function pullRelances() {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED, relances: [] };
+  try {
+    const res = await apiGet('pullRelances');
+    if (!res?.ok) return { ok: false, error: res?.error || 'Réponse inattendue du backend', relances: [] };
+    return { ok: true, relances: Array.isArray(res.relances) ? res.relances : [] };
+  } catch (err) {
+    return { ...fail(err), relances: [] };
+  }
+}
+
+/** Édite le sujet/corps d'une relance pas encore partie (modifiable jusqu'à J-1). -> { ok } */
+export async function modifierRelance(id, { sujet, corps } = {}) {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  try {
+    const res = await apiPost('modifierRelance', { id, sujet, corps });
+    if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
 /** Réglage global (option C). -> { ok, validationAvantEnvoi } */
 export async function getReglagesEnvoi() {
   if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
