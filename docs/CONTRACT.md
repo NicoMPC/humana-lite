@@ -61,12 +61,27 @@ Défauts vierges : `DEFAULT_DATA.routine(type)` dans `src/lib/pdf/index.js` / `e
 ## API A → B (src/lib/pdf/index.js)
 `renderPdf(doc, { loadAsset }) → Promise<{ blob, url, dataUrl, fileName }>`  (`dataUrl` = `doc.output('datauristring')`)
 `fileName` = `<Type>_<Nom>_<Prenom>_<AAAA-MM-JJ>.pdf`. Export aussi `THEMES`, `DEFAULT_BLOCKS(type)`, `browserAssetLoader`.
-`node scripts/test-pdf.mjs` (écrit par A) doit générer 3 types × 3 thèmes.
+`node scripts/test-pdf.mjs` (écrit par A) doit générer 2 types (peau, cheveux) × 3 thèmes.
 
 ## API C → B (src/lib/sheetsSync.js + store)
-`pullArchives() → Promise<{ ok, clients: [{id,prenom,nom,email,folderUrl}], documents: [{id,client_id,type,date,auteur,url,nom}] }>`
-`archivePdf({ client, docType, fileName, dataUrl, meta:{date,auteur,lieu} }) → Promise<{ ok, clientId, folderUrl, fileUrl, fileId, created:boolean }>`
+`pullArchives() → Promise<{ ok, clients: [{id,prenom,nom,email,folderUrl}], documents: [{id,client_id,type,date,auteur,url,nom,fileId,composerDoc?}] }>`
+`archivePdf({ client, docType, fileName, dataUrl, meta:{date,auteur,lieu}, composerDoc? }) → Promise<{ ok, clientId, folderUrl, fileUrl, fileId, created:boolean }>`
 Règle serveur : clé cliente = nom+prénom normalisés (minuscules, sans accents/espaces multiples) ; existante → même dossier, sinon création dossier + fiche.
+
+### Reprendre un document archivé pour l'éditer (26/10/2026)
+`composerDoc` (paramètre optionnel de `archivePdf`/`archiveEtEnvoyer`) = l'objet `doc` complet du compositeur
+au moment de l'archivage. Stocké par `archivePdf_` (`apps-script/Code.gs`) sur l'objet document avant l'`upsert_`
+(qui sérialise tout l'objet dans la colonne `json` — `composerDoc` ressort donc automatiquement dans `pull`,
+sans toucher `HEADERS`/`doGet`/`doPost`). `archiveEtEnvoyer_` délègue à `archivePdf_(p)` avec le même payload,
+donc `composerDoc` y transite sans code additionnel. Garde non bloquante : `clampComposerDoc_()` met
+`composerDoc` à `null` (jamais d'échec d'archivage) si sa sérialisation dépasse 40 000 caractères (marge sous
+la limite ~50 000 d'une cellule Sheets). `composerDoc` est **absent** pour les documents archivés avant cette
+version ou trop volumineux.
+Flux front : `pages/StudioPage.jsx#ComposeStep.run` envoie `composerDoc: doc` à l'archivage ;
+`store/useStudio.js#loadDoc(doc)` (`set({ doc, step: 2 })`) recharge directement à l'étape composition ;
+`pages/ArchivesPage.jsx` affiche un bouton « Reprendre pour modifier » près de « Ouvrir », uniquement quand
+`d.composerDoc` existe, avec confirmation (`confirmDialog`) si un brouillon est déjà en cours.
+`node scripts/test-reopen-doc.mjs` couvre l'aller-retour JSON du `doc` et le rendu PDF du doc rechargé.
 Composants C exposent : `pages/ArchivesPage.jsx` (défaut), `components/studio/ClientPicker.jsx` (`<ClientPicker value onChange />`, autocomplete sur `pullArchives`, saisie libre = nouvelle cliente).
 Stub attendu côté B tant que C n'a pas fini : appels via `lib/sheetsSync.js` uniquement (jamais `fetch` direct).
 
