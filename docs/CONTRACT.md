@@ -6,7 +6,7 @@ Chaque agent ne modifie QUE ses fichiers (listés dans son brief). Réponse fina
 ## Objet `doc` (état du compositeur, sérialisable)
 ```js
 doc = {
-  type: 'peau' | 'cheveux' | 'lifestyle',
+  type: 'peau' | 'cheveux',
   theme: 'sauge' | 'argile' | 'ardoise',
   client: { id?: string, prenom: string, nom: string, email?: string },
   meta: { date: 'YYYY-MM-DD', auteur: 'Jessie' | 'Nathalie' | string, lieu: 'boutique' | 'visio' },
@@ -25,7 +25,10 @@ data par kind :
   message     { texte: string }                    // = footerMessage par défaut
   coordonnees {}                                   // doc.boutique
 ```
-Défauts : peau/cheveux → entete, diagnostic, routine, conseils, message, coordonnees. lifestyle → entete, lifestyle, message, coordonnees.
+Défauts (26/10/2026, conforme au devis « onglet Lifestyle en fin de questionnaire ») : peau/cheveux →
+entete, diagnostic, routine, conseils, **lifestyle**, message, coordonnees. Le lifestyle n'est plus un
+`doc.type` séparé : c'est un bloc systématique en fin de chaque diagnostic (voir
+`docs/CONTRACT-ADDENDUM-lifestyle-tab.md` pour le détail du changement).
 Thèmes (`src/lib/pdf/themes.js`, propriétaire : agent A) : `THEMES[key] = { label, colors: <mêmes clés que COLORS de brand.js> }` ; sauge = palette actuelle.
 
 ### Détail `BlockKind: 'routine'` — structure selon `doc.type`
