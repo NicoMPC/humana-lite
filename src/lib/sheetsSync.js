@@ -67,12 +67,16 @@ export async function pullArchives() {
 
 /**
  * Archive un PDF (data-URL base64) dans le dossier Drive de la cliente.
+ * `composerDoc` (optionnel, rétrocompatible) : état complet du compositeur
+ * (objet `doc` du contrat), stocké côté serveur pour permettre de rouvrir ce
+ * document plus tard (Archives → "Reprendre pour modifier"). Garde de taille
+ * côté serveur, jamais bloquante pour l'archivage du PDF.
  * -> { ok, clientId, folderUrl, fileUrl, fileId, created } ou { ok:false, error }.
  */
-export async function archivePdf({ client, docType, fileName, dataUrl, meta } = {}) {
+export async function archivePdf({ client, docType, fileName, dataUrl, meta, composerDoc } = {}) {
   if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
   try {
-    const res = await apiPost('archivePdf', { client, docType, fileName, dataUrl, meta });
+    const res = await apiPost('archivePdf', { client, docType, fileName, dataUrl, meta, composerDoc });
     if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
     return { ok: true, clientId: res.clientId, folderUrl: res.folderUrl, fileUrl: res.fileUrl, fileId: res.fileId, created: !!res.created };
   } catch (err) {
@@ -87,12 +91,13 @@ export async function archivePdf({ client, docType, fileName, dataUrl, meta } = 
  * est mis en attente d'un clic humain : `envoiStatut` vaut alors 'en_attente'
  * au lieu de 'envoye'. La relance à J+14 est programmée côté serveur dès
  * l'envoi réel (immédiat ou validé plus tard), jamais dès l'archivage seul.
+ * `composerDoc` (optionnel, rétrocompatible) : voir `archivePdf`.
  * -> { ok, clientId, folderUrl, fileUrl, fileId, created, envoiStatut, pendingId? }
  */
-export async function archiveEtEnvoyer({ client, docType, fileName, dataUrl, meta, email, boutique, tutoiement } = {}) {
+export async function archiveEtEnvoyer({ client, docType, fileName, dataUrl, meta, email, boutique, tutoiement, composerDoc } = {}) {
   if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
   try {
-    const res = await apiPost('archiveEtEnvoyer', { client, docType, fileName, dataUrl, meta, email, boutique, tutoiement });
+    const res = await apiPost('archiveEtEnvoyer', { client, docType, fileName, dataUrl, meta, email, boutique, tutoiement, composerDoc });
     if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
     return {
       ok: true, clientId: res.clientId, folderUrl: res.folderUrl, fileUrl: res.fileUrl, fileId: res.fileId,

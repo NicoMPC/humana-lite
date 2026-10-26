@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { pullArchives, pullRelances, pullEnvoisEnAttente, modifierRelance } from '../lib/sheetsSync';
 import { normalize } from '../lib/format';
 import { formatDate } from '../lib/dates';
-import { toast } from '../store/useUI';
+import { toast, confirmDialog } from '../store/useUI';
+import { useStudio } from '../store/useStudio';
 import { Avatar, Badge, Button, EmptyState, Field, Input, Modal, Notice, SearchBar, SkeletonCard, Textarea } from '../components/ui';
 
 const TYPE_LABELS = { peau: 'Peau', cheveux: 'Cheveux', lifestyle: 'Lifestyle' };
@@ -27,10 +29,26 @@ function groupByClient(list, dateKey) {
 }
 
 export default function ArchivesPage() {
+  const navigate = useNavigate();
   const [state, setState] = useState({ status: 'loading', clients: [], documents: [], relances: [], pendingEnvois: [], error: '' });
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState(null);
   const [editing, setEditing] = useState(null); // relance en cours d'édition, ou null
+
+  /** Rouvre un document archivé dans le compositeur (Studio), en confirmant si un brouillon est en cours. */
+  const reprendre = async (d) => {
+    if (useStudio.getState().doc) {
+      const ok = await confirmDialog({
+        title: 'Reprendre ce document ?',
+        message: 'Le document en cours dans le compositeur (réponses, routine…) sera remplacé. S’il a déjà été archivé, il reste dans Archives.',
+        confirmLabel: 'Reprendre',
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    useStudio.getState().loadDoc(d.composerDoc);
+    navigate('/');
+  };
 
   const load = useCallback(async () => {
     setState((s) => ({ ...s, status: 'loading', error: '' }));
@@ -179,11 +197,16 @@ export default function ArchivesPage() {
                       </div>
                       <div className="small muted truncate" title={d.nom}>{d.auteur ? `par ${d.auteur}` : d.nom}</div>
                     </div>
-                    {d.url && (
-                      <a className="btn btn-sm" href={d.url} target="_blank" rel="noopener noreferrer">
-                        <i className="fa-solid fa-arrow-up-right-from-square" aria-hidden="true" /> Ouvrir
-                      </a>
-                    )}
+                    <div className="row gap-2">
+                      {d.composerDoc && (
+                        <Button size="sm" variant="soft" icon="fa-solid fa-pen-to-square" onClick={() => reprendre(d)}>Reprendre pour modifier</Button>
+                      )}
+                      {d.url && (
+                        <a className="btn btn-sm" href={d.url} target="_blank" rel="noopener noreferrer">
+                          <i className="fa-solid fa-arrow-up-right-from-square" aria-hidden="true" /> Ouvrir
+                        </a>
+                      )}
+                    </div>
                   </div>
                 ))}
 
