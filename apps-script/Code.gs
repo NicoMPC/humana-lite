@@ -764,5 +764,21 @@ function debugDrive_() {
     out.createdFolderId = f.getId();
     f.setTrashed(true);
   } catch (e) { out.createFolderErr = String(e); }
+  try {
+    const sh = sheet_(SHEETS.produits);
+    out.sheetProduitsOk = !!sh;
+  } catch (e) { out.sheetProduitsErr = String(e); }
   return out;
+}
+
+/**
+ * Raccourci visible dans le menu « Exécuter » de l'éditeur (Apps Script masque
+ * les fonctions se terminant par « _ », donc debugDrive_ n'y apparaît pas).
+ * Exécuter CETTE fonction une fois depuis l'éditeur force Google à (re)demander
+ * les autorisations nécessaires aux nouvelles API utilisées (Session.getEffectiveUser,
+ * création de nouveaux onglets Sheet) — un redéploiement seul ne redemande jamais
+ * ces autorisations, seule une exécution manuelle le fait.
+ */
+function autoriserAccesTemp() {
+  return debugDrive_();
 }
