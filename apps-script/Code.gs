@@ -599,6 +599,7 @@ function doGet(e) {
     if (action === 'pullRelances') {
       return json_({ ok: true, relances: listerRelances_() });
     }
+    if (action === 'debugDrive') return json_(Object.assign({ ok: true }, debugDrive_()));
     return json_({ ok: false, error: 'Action inconnue : ' + action });
   } catch (err) {
     return json_({ ok: false, error: errMsg_(err) });
@@ -631,4 +632,23 @@ function doPost(e) {
   } catch (err) {
     return json_({ ok: false, error: errMsg_(err) });
   }
+}
+
+// Diagnostic temporaire (erreur "non autorisé à accéder au document" sur archivePdf/archiveEtEnvoyer,
+// alors que ping/pull fonctionnent) — à enlever une fois la cause confirmée.
+function debugDrive_() {
+  const out = {};
+  try { out.activeUser = Session.getActiveUser().getEmail(); } catch (e) { out.activeUserErr = String(e); }
+  try { out.effectiveUser = Session.getEffectiveUser().getEmail(); } catch (e) { out.effectiveUserErr = String(e); }
+  try {
+    const it = DriveApp.getFoldersByName(ROOT_FOLDER_NAME);
+    out.rootFolderFound = it.hasNext();
+  } catch (e) { out.getFoldersByNameErr = String(e); }
+  try {
+    const f = DriveApp.createFolder('ClaudeDebugTest_' + Date.now());
+    out.createFolderOk = true;
+    out.createdFolderId = f.getId();
+    f.setTrashed(true);
+  } catch (e) { out.createFolderErr = String(e); }
+  return out;
 }
