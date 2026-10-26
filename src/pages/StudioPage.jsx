@@ -160,7 +160,7 @@ function ComposeStep({ doc }) {
       if (mode === 'archive') {
         let res;
         try {
-          res = await archivePdf({ client: doc.client, docType: doc.type, fileName: pdf.fileName, dataUrl: pdf.dataUrl, meta });
+          res = await archivePdf({ client: doc.client, docType: doc.type, fileName: pdf.fileName, dataUrl: pdf.dataUrl, meta, composerDoc: doc });
         } catch (e) {
           res = { ok: false, error: String(e) };
         }
@@ -187,7 +187,7 @@ function ComposeStep({ doc }) {
         res = await archiveEtEnvoyer({
           client: doc.client, docType: doc.type, fileName: pdf.fileName, dataUrl: pdf.dataUrl, meta,
           email: { to: emailDraft.to, sujet: emailDraft.sujet, corps: emailDraft.corps },
-          boutique: { nom: doc.boutique?.nom }, tutoiement,
+          boutique: { nom: doc.boutique?.nom }, tutoiement, composerDoc: doc,
         });
       } catch (e) {
         res = { ok: false, error: String(e) };

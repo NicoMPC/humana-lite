@@ -64,6 +64,25 @@ const HEADERS = {
 const ROOT_FOLDER_NAME = "Archives Hu'mana";
 const MAX_BASE64_LENGTH = 35 * 1024 * 1024;
 
+// Limite non bloquante pour le champ `composerDoc` (état complet du compositeur,
+// stocké tel quel dans la colonne "json" de ArchDocuments pour permettre de
+// rouvrir un document archivé) : une cellule Google Sheets plafonne vers 50 000
+// caractères, on se garde une marge. Si `composerDoc` dépasse, on l'omet
+// silencieusement (null) — l'archivage du PDF ne doit JAMAIS échouer pour ça.
+const MAX_COMPOSER_DOC_LENGTH = 40000;
+
+/** Renvoie `obj` tel quel si sa sérialisation JSON passe sous la limite, sinon null. */
+function clampComposerDoc_(obj) {
+  if (obj == null) return null;
+  try {
+    const s = JSON.stringify(obj);
+    if (s && s.length <= MAX_COMPOSER_DOC_LENGTH) return obj;
+  } catch (e) {
+    // sérialisation impossible (référence circulaire, etc.) : on n'échoue jamais pour ça.
+  }
+  return null;
+}
+
 // Chiffre figé par le devis signé + les réponses d'onboarding (14 jours,
 // confirmé deux fois) : ne jamais le changer sans instruction explicite.
 const RELANCE_DELAI_JOURS = 14;
@@ -263,6 +282,11 @@ function archivePdf_(p) {
       id: uid_('doc'), client_id: client.id, type: docType, date: String(meta.date || '').slice(0, 10),
       auteur: cleanName_(meta.auteur), lieu: cleanName_(meta.lieu), url: fileUrl, nom: fileName, fileId: file.getId(),
     };
+    // État complet du compositeur, pour pouvoir rouvrir ce document plus tard (Archives →
+    // "Reprendre pour modifier"). `upsert_` sérialise tout `doc` dans la colonne "json" — pas
+    // besoin de toucher HEADERS ni doGet/doPost, `readAll_`/pull le renvoient déjà tel quel.
+    // Garde de taille non bloquante : voir clampComposerDoc_.
+    doc.composerDoc = clampComposerDoc_(p.composerDoc || null);
     upsert_(SHEETS.documents, doc, {
       client_id: doc.client_id, type: doc.type, date: doc.date, auteur: doc.auteur, url: doc.url, nom: doc.nom,
     });

@@ -51,6 +51,10 @@ export const useStudio = create(
         setTutoiement: (tutoiement) => set({ tutoiement }),
         start: (type, auteur) => set({ doc: newDoc(type, auteur), step: 1 }),
         reset: () => set({ doc: null, step: 0 }),
+        // Reprend un document déjà archivé (Archives → "Reprendre pour modifier") : repart
+        // directement à l'étape composition, pas au choix de type ni au questionnaire — le
+        // bouton "Retour" de ComposeStep permet d'y revenir si besoin.
+        loadDoc: (doc) => set({ doc, step: 2 }),
 
         setClient: (client) => upd((d) => ({ ...d, client: { prenom: '', nom: '', email: '', ...client } })),
         setMeta: (patch) => upd((d) => ({ ...d, meta: { ...d.meta, ...patch } })),
