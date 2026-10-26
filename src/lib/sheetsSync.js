@@ -186,3 +186,57 @@ export async function setValidationAvantEnvoi(validationAvantEnvoi) {
     return fail(err);
   }
 }
+
+/**
+ * Catalogue produits partagé entre les 2 postes (onglet `LiteProduits`, distinct
+ * de l'onglet `Produits` de la boutique dans le même classeur). -> { ok, produits }
+ */
+export async function pullProduits() {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED, produits: [] };
+  try {
+    const res = await apiGet('pullProduits');
+    if (!res?.ok) return { ok: false, error: res?.error || 'Réponse inattendue du backend', produits: [] };
+    return { ok: true, produits: Array.isArray(res.produits) ? res.produits : [] };
+  } catch (err) {
+    return { ...fail(err), produits: [] };
+  }
+}
+
+/** Remplace l'intégralité du catalogue côté Sheet (dernière écriture gagne). -> { ok } */
+export async function pushProduits(produits) {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  try {
+    const res = await apiPost('pushProduits', { produits });
+    if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Réglages boutique partagés (onglet `Reglages`, document unique). -> { ok, reglages }
+ * `reglages` vaut `null` si jamais écrit côté Sheet.
+ */
+export async function pullReglages() {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED, reglages: null };
+  try {
+    const res = await apiGet('pullReglages');
+    if (!res?.ok) return { ok: false, error: res?.error || 'Réponse inattendue du backend', reglages: null };
+    return { ok: true, reglages: res.reglages || null };
+  } catch (err) {
+    return { ...fail(err), reglages: null };
+  }
+}
+
+/** Remplace le document unique de réglages côté Sheet (dernière écriture gagne). -> { ok } */
+export async function pushReglages(reglages) {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  try {
+    const res = await apiPost('pushReglages', { reglages });
+    if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
