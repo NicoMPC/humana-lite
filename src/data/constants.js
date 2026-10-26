@@ -3,7 +3,6 @@
 export const DIAG_TYPES = {
   peau: { key: 'peau', label: 'Peau', icon: 'fa-solid fa-spa', color: 'sage' },
   cheveux: { key: 'cheveux', label: 'Cheveux', icon: 'fa-solid fa-wind', color: 'clay' },
-  lifestyle: { key: 'lifestyle', label: 'Lifestyle', icon: 'fa-solid fa-seedling', color: 'gold' },
 };
 
 /** Libellé des « boîtes » du compositeur, une par kind de bloc du PDF (voir docs/CONTRACT.md). */
@@ -19,9 +18,8 @@ export const BLOCK_LABELS = {
 
 /** Blocs par défaut (ordre = ordre dans le PDF), voir docs/CONTRACT.md. */
 export const DEFAULT_KINDS = {
-  peau: ['entete', 'diagnostic', 'routine', 'conseils', 'message', 'coordonnees'],
-  cheveux: ['entete', 'diagnostic', 'routine', 'conseils', 'message', 'coordonnees'],
-  lifestyle: ['entete', 'lifestyle', 'message', 'coordonnees'],
+  peau: ['entete', 'diagnostic', 'routine', 'conseils', 'lifestyle', 'message', 'coordonnees'],
+  cheveux: ['entete', 'diagnostic', 'routine', 'conseils', 'lifestyle', 'message', 'coordonnees'],
 };
 
 /** Pastilles du sélecteur de thème (affichage seulement — la vraie palette est dans lib/pdf/themes.js). */

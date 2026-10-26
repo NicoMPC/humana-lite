@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 /**
- * Test du moteur PDF : 3 types (peau, cheveux, lifestyle) × 3 thèmes, tous
- * blocs activés, données fictives. Vérifie : pas d'erreur, taille > 0, ≤ 3 pages.
+ * Test du moteur PDF : 2 types (peau, cheveux) × 3 thèmes, tous blocs
+ * activés (y compris le bloc « lifestyle », désormais inclus par défaut en
+ * fin de questionnaire — voir docs/CONTRACT-ADDENDUM-lifestyle-tab.md).
+ * Vérifie : pas d'erreur, taille > 0, ≤ 3 pages, présence d'un bloc lifestyle
+ * dans DEFAULT_BLOCKS.
  * Écrit les PDF dans /tmp/humana-lite-pdf (ou $OUT_DIR) pour inspection.
  *
  * Usage : node scripts/test-pdf.mjs
@@ -42,7 +45,6 @@ const REPONSES = {
     'qc-lavage': '2 à 3 fois / semaine', 'qc-chaleur': 'oui', 'qc-routine': 'Shampoing doux, après-shampoing sur les longueurs.',
     'qc-allergies': 'Aucune', 'qc-objectif': 'Définition des boucles',
   },
-  lifestyle: {},
 };
 
 const ROUTINES = {
@@ -82,7 +84,14 @@ function buildDoc(type, theme) {
 }
 
 let failures = 0;
-for (const type of ['peau', 'cheveux', 'lifestyle']) {
+for (const type of ['peau', 'cheveux']) {
+  // Le devis promet un bloc lifestyle en fin de chaque diagnostic : on vérifie
+  // qu'il est bien présent par défaut avant même de rendre le PDF.
+  if (!DEFAULT_BLOCKS(type).some((b) => b.kind === 'lifestyle')) {
+    failures += 1;
+    console.error(`FAIL ${type}: aucun bloc 'lifestyle' dans DEFAULT_BLOCKS('${type}')`);
+    continue;
+  }
   for (const theme of Object.keys(THEMES)) {
     const label = `${type} × ${theme}`;
     try {

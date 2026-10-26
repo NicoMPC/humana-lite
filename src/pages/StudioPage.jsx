@@ -17,7 +17,6 @@ import { ClientPicker } from '../components/studio/ClientPicker';
 const TYPE_CARDS = [
   { key: 'cheveux', label: 'Cheveux', text: 'Questionnaire capillaire, routine, conseils.', icon: 'fa-solid fa-wind' },
   { key: 'peau', label: 'Peau', text: 'Questionnaire visage, routine, conseils.', icon: 'fa-solid fa-spa' },
-  { key: 'lifestyle', label: 'Lifestyle', text: 'Conseils bien-être, sans questionnaire.', icon: 'fa-solid fa-seedling' },
 ];
 const STEPS = ['Choix', 'Rendez-vous', 'Composition'];
 
