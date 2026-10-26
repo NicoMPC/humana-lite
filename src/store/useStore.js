@@ -1,18 +1,44 @@
 /**
  * Store global (Zustand + persistance localStorage) : session, produits,
  * réglages. Le document en cours de composition est dans `useStudio.js`.
+ *
+ * Produits et réglages sont aussi synchronisés avec le classeur partagé
+ * (onglets `LiteProduits`/`Reglages`, voir `apps-script/Code.gs` et
+ * `lib/sheetsSync.js`) pour que Jessie et Nathalie voient le même catalogue
+ * sur leurs 2 postes : pull au démarrage (`hydrateFromSheet`, appelé une fois
+ * depuis `App.jsx`), push debounced (500 ms) après chaque mutation locale.
+ * Best-effort dans les deux sens : un pull ou un push qui échoue (backend pas
+ * encore déployé, hors ligne) laisse le cache localStorage tel quel, jamais
+ * de blocage ni de plantage de l'UI — dernière écriture gagne, pas de fusion
+ * fine (2 utilisatrices, volume faible : choix de simplicité volontaire).
  */
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { buildSeed, SCHEMA_VERSION } from '../data/seed';
 import { uid } from '../lib/ids';
 import { nowISO, todayISO } from '../lib/dates';
+import { pullProduits, pushProduits, pullReglages, pushReglages } from '../lib/sheetsSync';
 
 export const STORAGE_KEY = 'humana.lite.v1';
 
+const SYNC_DEBOUNCE_MS = 500;
+let produitsSyncTimer = null;
+let reglagesSyncTimer = null;
+
+/** Push best-effort, debounced : la valeur poussée est celle lue au moment du tir, pas celle de l'appel. */
+function schedulePushProduits(getProduits) {
+  clearTimeout(produitsSyncTimer);
+  produitsSyncTimer = setTimeout(() => { pushProduits(getProduits()); }, SYNC_DEBOUNCE_MS);
+}
+
+function schedulePushReglages(getSettings) {
+  clearTimeout(reglagesSyncTimer);
+  reglagesSyncTimer = setTimeout(() => { pushReglages(getSettings()); }, SYNC_DEBOUNCE_MS);
+}
+
 export const useStore = create(
   persist(
-    (set) => ({
+    (set, get) => ({
       ...buildSeed(),
       session: { userId: null },
 
@@ -20,14 +46,34 @@ export const useStore = create(
       login: (userId) => set({ session: { userId } }),
       logout: () => set({ session: { userId: null } }),
 
+      /**
+       * Pull initial depuis le Sheet partagé (appelé une fois au montage de l'app).
+       * Ne remplace l'état local que si la requête réussit ; sinon le cache
+       * localStorage existant reste en place, silencieusement.
+       */
+      hydrateFromSheet: async () => {
+        const [produitsRes, reglagesRes] = await Promise.all([pullProduits(), pullReglages()]);
+        set((s) => ({
+          produits: produitsRes.ok ? produitsRes.produits : s.produits,
+          settings: reglagesRes.ok && reglagesRes.reglages ? { ...s.settings, ...reglagesRes.reglages } : s.settings,
+        }));
+      },
+
       /* Produits */
       addProduit: (payload) => {
         const p = { id: uid('p'), actif: true, stock: 0, prix: '', categorie: '', cible: 'mixte', reference: '', ean: '', description: '', ...payload };
         set((s) => ({ produits: [...s.produits, p] }));
+        schedulePushProduits(() => get().produits);
         return p;
       },
-      updateProduit: (id, patch) => set((s) => ({ produits: s.produits.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
-      deleteProduit: (id) => set((s) => ({ produits: s.produits.filter((p) => p.id !== id) })),
+      updateProduit: (id, patch) => {
+        set((s) => ({ produits: s.produits.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
+        schedulePushProduits(() => get().produits);
+      },
+      deleteProduit: (id) => {
+        set((s) => ({ produits: s.produits.filter((p) => p.id !== id) }));
+        schedulePushProduits(() => get().produits);
+      },
 
       /** Applique un plan d'import Planity/CSV (voir `lib/planityImport.js`). */
       applyStockImport: (plan, auteurId) => {
@@ -46,11 +92,16 @@ export const useStore = create(
             },
           },
         }));
+        schedulePushProduits(() => get().produits);
+        schedulePushReglages(() => get().settings);
         return created;
       },
 
       /* Réglages */
-      updateSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...(typeof patch === 'function' ? patch(s.settings) : patch) } })),
+      updateSettings: (patch) => {
+        set((s) => ({ settings: { ...s.settings, ...(typeof patch === 'function' ? patch(s.settings) : patch) } }));
+        schedulePushReglages(() => get().settings);
+      },
     }),
     {
       name: STORAGE_KEY,

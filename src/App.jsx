@@ -1,5 +1,6 @@
+import { useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { useCurrentUser } from './store/useStore';
+import { useStore, useCurrentUser } from './store/useStore';
 import { AppShell } from './components/layout/AppShell';
 import { Toaster, ConfirmDialog } from './components/ui';
 import LoginPage from './pages/LoginPage';
@@ -17,6 +18,10 @@ function RequireAuth({ children }) {
 
 export default function App() {
   const user = useCurrentUser();
+  // Pull unique du catalogue produits + réglages depuis le Sheet partagé au
+  // démarrage (voir useStore#hydrateFromSheet) : best-effort, ne bloque jamais
+  // l'affichage, garde le cache localStorage si le backend est indisponible.
+  useEffect(() => { useStore.getState().hydrateFromSheet(); }, []);
   return (
     <>
       <Routes>

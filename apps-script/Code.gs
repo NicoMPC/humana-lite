@@ -11,7 +11,12 @@
  * Projet Apps Script AUTONOME (pas celui de la boutique) : il ouvre le
  * classeur partagé par id (SPREADSHEET_ID) mais n'utilise que ses propres
  * onglets, créés automatiquement s'ils manquent. Il ne lit ni n'écrit jamais
- * Clientes / Diagnostics / Produits / Settings (onglets de la boutique) :
+ * Clientes / Diagnostics / Produits / Settings (onglets DE LA BOUTIQUE, même
+ * classeur, projet Apps Script séparé) : c'est pour ça que l'onglet produits
+ * du Lite s'appelle `LiteProduits` et non `Produits` — un nom identique
+ * pointerait vers l'onglet réel de la boutique et écraserait ses données en
+ * production. `Reglages` (français) ne collisionne pas avec `Settings`
+ * (anglais) de la boutique, donc gardé tel quel.
  *   ArchClientes  : id | cle | prenom | nom | email | folderUrl | date_creation | json
  *   ArchDocuments : id | client_id | type | date | auteur | url | nom | json
  *   EnvoisEnAttente : id | client_id | email | prenom | sujet | date_creation | statut | auteur | json
@@ -19,6 +24,12 @@
  *   RelanceQueue  : id | client_id | email | prenom | date_envoi_diag | date_relance_prevue | statut | auteur | json
  *     (json ajoute : nom, boutiqueNom, tutoiement, sujet, corps — brouillon généré à la
  *     programmation, éditable jusqu'à J-1 —, modifie:boolean)
+ *   LiteProduits  : id | nom | reference | prix | categorie | actif | stock | json
+ *     (json = objet produit complet : id, nom, prix, categorie, actif, stock, cible,
+ *     reference, ean, description — catalogue partagé Jessie/Nathalie)
+ *   Reglages      : id | boutique_nom | date_maj | json
+ *     (document UNIQUE, id fixe 'reglages' ; json = objet settings complet du store :
+ *     securite, boutique, footerMessage, stock — remplacé en entier à chaque push)
  * La colonne "json" fait foi ; les autres colonnes sont là pour un coup d'oeil.
  *
  * Sécurité : toute requête (GET ou POST) doit porter le `token`, comparé à la
@@ -40,12 +51,16 @@
  *           GET  getReglages -> { ok, validationAvantEnvoi }
  *           GET  pullEnvoisEnAttente -> { ok, envois }
  *           GET  pullRelances -> { ok, relances }  (historique + à venir, champ calculé `editable`)
+ *           GET  pullProduits -> { ok, produits }
+ *           GET  pullReglages -> { ok, reglages }  (objet, ou null si jamais écrit)
  *           POST archivePdf -> { ok, clientId, folderUrl, fileUrl, fileId, created }
  *           POST archiveEtEnvoyer -> { ok, clientId, folderUrl, fileUrl, fileId, created, envoiStatut }
  *           POST validerEnvoi -> { ok }
  *           POST annulerEnvoi -> { ok }
  *           POST definirValidationAvantEnvoi -> { ok, validationAvantEnvoi }
  *           POST modifierRelance -> { ok } ou { ok:false, error }  (sujet/corps, verrouillé à J-1)
+ *           POST pushProduits -> { ok }  (payload { produits:[...] }, remplace tout le catalogue)
+ *           POST pushReglages -> { ok }  (payload { reglages:{...} }, document unique)
  */
 
 const SPREADSHEET_ID = '1SrQZBSWigFrw3H62_j56iRowGgWXOFfJZGMZG2UO83U';
@@ -54,13 +69,22 @@ const SHEETS = {
   documents: 'ArchDocuments',
   pending: 'EnvoisEnAttente',
   relances: 'RelanceQueue',
+  // Noms distincts des onglets `Produits`/`Settings` de la boutique (même classeur,
+  // autre projet Apps Script) : un nom identique écrirait dans ses onglets réels.
+  produits: 'LiteProduits',
+  reglages: 'Reglages',
 };
 const HEADERS = {
   ArchClientes: ['id', 'cle', 'prenom', 'nom', 'email', 'folderUrl', 'date_creation', 'json'],
   ArchDocuments: ['id', 'client_id', 'type', 'date', 'auteur', 'url', 'nom', 'json'],
   EnvoisEnAttente: ['id', 'client_id', 'email', 'prenom', 'sujet', 'date_creation', 'statut', 'auteur', 'json'],
   RelanceQueue: ['id', 'client_id', 'email', 'prenom', 'date_envoi_diag', 'date_relance_prevue', 'statut', 'auteur', 'json'],
+  LiteProduits: ['id', 'nom', 'reference', 'prix', 'categorie', 'actif', 'stock', 'json'],
+  Reglages: ['id', 'boutique_nom', 'date_maj', 'json'],
 };
+
+// Id fixe de l'unique ligne de réglages (pas une liste, un seul document partagé).
+const REGLAGES_ID = 'reglages';
 const ROOT_FOLDER_NAME = "Archives Hu'mana";
 const MAX_BASE64_LENGTH = 35 * 1024 * 1024;
 
@@ -292,6 +316,62 @@ function archivePdf_(p) {
     });
     SpreadsheetApp.flush();
     return { client, clientId: client.id, folderUrl: client.folderUrl, fileUrl, fileId: file.getId(), created };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ---------------------------------------------------------------------- *
+ * Catalogue produits + réglages boutique, partagés entre les 2 postes
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Remplace l'intégralité du catalogue côté Sheet (le client renvoie toujours
+ * l'état complet après chaque mutation locale — cohérent avec le faible
+ * volume, 2 utilisatrices, dernière écriture gagne). On vide d'abord les
+ * lignes existantes puis on réécrit via upsert_ comme les autres onglets.
+ */
+function pushProduits_(produits) {
+  if (!Array.isArray(produits)) throw new Error('Liste de produits invalide');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const sh = sheet_(SHEETS.produits);
+    const lastRow = sh.getLastRow();
+    if (lastRow > 1) sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).clearContent();
+    produits.forEach((p) => {
+      if (!p || !p.id) return;
+      upsert_(SHEETS.produits, p, {
+        nom: p.nom || '', reference: p.reference || '', prix: p.prix || '',
+        categorie: p.categorie || '', actif: p.actif !== false, stock: p.stock || 0,
+      });
+    });
+    SpreadsheetApp.flush();
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Document unique (id fixe REGLAGES_ID) ; renvoie l'objet directement, ou null si jamais écrit. */
+function pullReglages_() {
+  const all = readAll_(SHEETS.reglages);
+  return all.find((r) => r && r.id === REGLAGES_ID) || null;
+}
+
+/** Écrit (upsert_) le document unique de réglages, toujours sur le même id fixe. */
+function pushReglages_(reglages) {
+  if (!reglages || typeof reglages !== 'object') throw new Error('Réglages invalides');
+  const obj = Object.assign({}, reglages, { id: REGLAGES_ID });
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    upsert_(SHEETS.reglages, obj, {
+      boutique_nom: (obj.boutique && obj.boutique.nom) || '',
+      date_maj: new Date().toISOString(),
+    });
+    SpreadsheetApp.flush();
+    return { ok: true };
   } finally {
     lock.releaseLock();
   }
@@ -624,6 +704,12 @@ function doGet(e) {
       return json_({ ok: true, relances: listerRelances_() });
     }
     if (action === 'debugDrive') return json_(Object.assign({ ok: true }, debugDrive_()));
+    if (action === 'pullProduits') {
+      return json_({ ok: true, produits: readAll_(SHEETS.produits) });
+    }
+    if (action === 'pullReglages') {
+      return json_({ ok: true, reglages: pullReglages_() });
+    }
     return json_({ ok: false, error: 'Action inconnue : ' + action });
   } catch (err) {
     return json_({ ok: false, error: errMsg_(err) });
@@ -650,6 +736,10 @@ function doPost(e) {
         return json_({ ok: true, validationAvantEnvoi: definirValidationAvantEnvoi_(!!(payload && payload.validationAvantEnvoi)) });
       case 'modifierRelance':
         return json_(modifierRelance_(payload && payload.id, payload));
+      case 'pushProduits':
+        return json_(Object.assign({ ok: true }, pushProduits_(payload && payload.produits)));
+      case 'pushReglages':
+        return json_(Object.assign({ ok: true }, pushReglages_(payload && payload.reglages)));
       default:
         return json_({ ok: false, error: 'Action inconnue : ' + action });
     }
