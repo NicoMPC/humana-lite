@@ -53,9 +53,7 @@ const DEFAULT_DATA = {
 
 /** Blocs par défaut d'un type de document (tous activés, ordre du contrat). */
 export function DEFAULT_BLOCKS(type) {
-  const kinds = type === 'lifestyle'
-    ? ['entete', 'lifestyle', 'message', 'coordonnees']
-    : ['entete', 'diagnostic', 'routine', 'conseils', 'message', 'coordonnees'];
+  const kinds = ['entete', 'diagnostic', 'routine', 'conseils', 'lifestyle', 'message', 'coordonnees'];
   return kinds.map((kind) => ({ id: kind, kind, on: true, data: DEFAULT_DATA[kind](type) }));
 }
 
