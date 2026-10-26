@@ -118,3 +118,22 @@ une fois) : voir l'en-tête de `apps-script/Code.gs`.
 ## Store / données locales
 Produits en localStorage (Zustand, `store/useStore.js`, propriétaire : B) : `{ id, nom, ref?, prix?, categorie?, actif }` ; import CSV/Planity via `lib/planityImport.js` existant.
 Réglages boutique + signature + code d'accès (`Humanabeta`) : `settings` du store, propriétaire : B.
+
+### Catalogue & réglages partagés entre les 2 postes (26/10/2026)
+`produits` et `settings` restent en localStorage (cache immédiat, jamais bloquant) mais sont désormais
+synchronisés avec le classeur Sheet partagé, sur deux nouveaux onglets **distincts** de ceux de
+`humana-boutique` (même classeur, projet Apps Script séparé de la boutique qui utilise déjà `Produits`/`Settings`
+sur ce classeur — collision évitée) : `LiteProduits` et `Reglages` (document unique, id fixe `'reglages'`).
+
+Actions (`apps-script/Code.gs` + `lib/sheetsSync.js`, même pattern que les actions d'archivage : jamais
+d'exception, toujours `{ ok, ... }` ou `{ ok:false, error }`) :
+`pullProduits() → Promise<{ ok, produits:[...] }>` · `pushProduits(produits) → Promise<{ ok }>` (remplace
+l'intégralité du catalogue, `LockService` comme `archivePdf_`) · `pullReglages() → Promise<{ ok, reglages }>`
+(`reglages:null` si jamais écrit) · `pushReglages(reglages) → Promise<{ ok }>`.
+
+Côté `store/useStore.js` : `hydrateFromSheet()` tire produits+réglages une fois au montage (`App.jsx`,
+racine) et remplace l'état local si le pull réussit, sinon garde le cache localStorage sans bloquer l'UI.
+Chaque mutation (`addProduit`, `updateProduit`, `deleteProduit`, `applyStockImport`, `updateSettings`)
+déclenche un push debounced (500 ms) best-effort — pas de `await`, pas de rollback, dernière écriture gagne
+(pas de fusion fine : choix de simplicité pour 2 utilisatrices). `node scripts/test-produits-sync.mjs` couvre
+les 4 fonctions (mock `fetch`), succès et échecs (réseau, `{ ok:false }`).
