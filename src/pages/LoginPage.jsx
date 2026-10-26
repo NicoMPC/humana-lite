@@ -4,32 +4,37 @@ import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/useStore';
 import { Avatar, Button, Field, Input } from '../components/ui';
 import { fullName } from '../lib/format';
+import { login as loginBackend } from '../lib/sheetsSync';
 
 /**
- * Écran de connexion : un code d'accès partagé (réglable dans Réglages) protège d'abord l'app, puis on choisit un profil sans mot de
- * passe individuel.
+ * Écran de connexion (Lot 4) : chaque gérante choisit son profil puis entre son
+ * propre mot de passe, vérifié côté serveur (apps-script/Code.gs, action `login`)
+ * — plus de code d'accès partagé dans le bundle public.
  */
 export default function LoginPage() {
   const users = useStore(useShallow((s) => s.users.filter((u) => u.actif !== false)));
   const login = useStore((s) => s.login);
-  const codeAttendu = useStore((s) => s.settings.securite?.code || '');
   const navigate = useNavigate();
-  const [unlocked, setUnlocked] = useState(false);
-  const [code, setCode] = useState('');
-  const [codeError, setCodeError] = useState('');
   const [selected, setSelected] = useState(users[0]?.id);
+  const [step, setStep] = useState('choix'); // 'choix' | 'motdepasse'
+  const [motDePasse, setMotDePasse] = useState('');
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const submitCode = (e) => {
-    e.preventDefault();
-    if (code === codeAttendu) { setCodeError(''); setUnlocked(true); }
-    else setCodeError('Code incorrect.');
-  };
+  const utilisatrice = users.find((u) => u.id === selected);
 
-  const submit = () => {
-    if (!selected) return;
+  const choisir = (id) => { setSelected(id); setError(''); setMotDePasse(''); setStep('motdepasse'); };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!utilisatrice || !motDePasse) return;
     setLoading(true);
-    setTimeout(() => { login(selected); navigate('/'); }, 450);
+    setError('');
+    const res = await loginBackend(utilisatrice.prenom, motDePasse);
+    setLoading(false);
+    if (!res.ok) { setError(res.error || 'Identifiant ou mot de passe incorrect.'); return; }
+    login(utilisatrice.id);
+    navigate('/');
   };
 
   return (
@@ -45,40 +50,40 @@ export default function LoginPage() {
         <p className="small foot-note" style={{ color: 'rgba(255,255,255,.7)', position: 'relative' }}>Accès réservé à l’équipe Hu’mana</p>
       </section>
       <section className="login-panel">
-        {!unlocked ? (
-          <form className="login-card anim-fade-up" onSubmit={submitCode}>
-            <div className="eyebrow mb-1">Accès protégé</div>
-            <h2 style={{ fontSize: 'var(--fs-3xl)' }}>Code d’accès</h2>
-            <p className="muted mt-1 mb-3">Saisissez le code partagé de la boutique pour continuer.</p>
-            <Field label="Code d’accès" required>
-              {(id) => <Input id={id} type="password" autoFocus value={code} onChange={(e) => { setCode(e.target.value); setCodeError(''); }} />}
-            </Field>
-            {codeError && <p className="xs mt-1" style={{ color: 'var(--clay-600)' }}>{codeError}</p>}
-            <Button type="submit" variant="primary" size="lg" block className="mt-3" disabled={!code} iconRight="fa-solid fa-arrow-right">
-              Continuer
-            </Button>
-          </form>
-        ) : (
+        {step === 'choix' ? (
           <div className="login-card anim-fade-up">
             <div className="eyebrow mb-1">Bienvenue</div>
             <h2 style={{ fontSize: 'var(--fs-3xl)' }}>Qui êtes-vous ?</h2>
-            <p className="muted mt-1 mb-3">Choisissez votre profil pour ouvrir votre espace.</p>
+            <p className="muted mt-1 mb-3">Choisissez votre profil pour continuer.</p>
             <div className="account-list stagger">
               {users.map((u) => (
-                <button key={u.id} type="button" className={`account ${selected === u.id ? 'is-selected' : ''}`} onClick={() => setSelected(u.id)} onDoubleClick={submit}>
+                <button key={u.id} type="button" className="account" onClick={() => choisir(u.id)}>
                   <Avatar person={u} size="lg" color={u.couleur} />
                   <span className="who">
                     <b>{fullName(u)}</b>
                     <span>Gérante</span>
                   </span>
-                  {selected === u.id && <i className="fa-solid fa-circle-check" style={{ color: 'var(--primary)' }} />}
+                  <i className="fa-solid fa-chevron-right" style={{ color: 'var(--muted)' }} />
                 </button>
               ))}
             </div>
-            <Button variant="primary" size="lg" block className="mt-3" onClick={submit} loading={loading} iconRight="fa-solid fa-arrow-right">
+          </div>
+        ) : (
+          <form className="login-card anim-fade-up" onSubmit={submit}>
+            <button type="button" className="link-back xs mb-1" onClick={() => setStep('choix')} style={{ background: 'none', border: 0, color: 'var(--muted)', cursor: 'pointer', padding: 0 }}>
+              <i className="fa-solid fa-arrow-left" /> Changer de profil
+            </button>
+            <div className="eyebrow mb-1">Bonjour {utilisatrice?.prenom}</div>
+            <h2 style={{ fontSize: 'var(--fs-3xl)' }}>Votre mot de passe</h2>
+            <p className="muted mt-1 mb-3">Connexion personnelle, vérifiée côté serveur.</p>
+            <Field label="Mot de passe" required>
+              {(id) => <Input id={id} type="password" autoFocus value={motDePasse} onChange={(e) => { setMotDePasse(e.target.value); setError(''); }} />}
+            </Field>
+            {error && <p className="xs mt-1" style={{ color: 'var(--clay-600)' }}>{error}</p>}
+            <Button type="submit" variant="primary" size="lg" block className="mt-3" disabled={!motDePasse} loading={loading} iconRight="fa-solid fa-arrow-right">
               Ouvrir mon espace
             </Button>
-          </div>
+          </form>
         )}
       </section>
     </div>

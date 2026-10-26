@@ -121,6 +121,10 @@
 .login-card { width: min(100%, 440px); }
 .account-list { display: grid; gap: .6rem; }
 
+/* Formulaire pré-rdv : page publique, hors AppShell */
+.pre-rdv-page { min-height: 100vh; display: grid; place-items: center; padding: var(--sp-6); background: var(--bg-muted); }
+.pre-rdv-card { width: min(100%, 560px); display: flex; flex-direction: column; }
+
 @keyframes blobDrift { from { transform: translate(0, 0) scale(1); } to { transform: translate(-18px, 22px) scale(1.06); } }
 
 /* Voile d'ouverture (une fois par session) */

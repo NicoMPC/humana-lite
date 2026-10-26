@@ -5,7 +5,6 @@ import { useStore, useCurrentUser } from '../store/useStore';
 import { useStudio } from '../store/useStudio';
 import { toast, confirmDialog } from '../store/useUI';
 import { DIAG_TYPES, THEME_SWATCHES } from '../data/constants';
-import { QUESTIONS_DEMO } from '../data/questions';
 import { renderPdf, archivePdf, archiveEtEnvoyer } from '../lib/studioBridge';
 import { buildEmail, gmailComposeUrl } from '../lib/email';
 import { Button, Field, Input, Modal, Notice, Segmented, Select } from '../components/ui';
@@ -88,7 +87,7 @@ function TypeChoice() {
 function RdvStep({ doc }) {
   const actions = useStudio.getState();
   const users = useStore(useShallow((s) => s.users.filter((u) => u.actif !== false)));
-  const questions = QUESTIONS_DEMO[doc.type];
+  const questions = useStore((s) => s.questions)[doc.type];
   const clientOk = doc.client.prenom.trim() && doc.client.nom.trim();
   const auteurs = users.some((u) => u.prenom === doc.meta.auteur) ? users : [...users, { id: 'x', prenom: doc.meta.auteur }];
 

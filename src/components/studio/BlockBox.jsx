@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { BLOCK_LABELS, LIFESTYLE_TIPS } from '../../data/constants';
 import { answerIsFilled } from '../../store/selectors';
-import { QUESTIONS_DEMO as QUESTIONS } from '../../data/questions';
+import { useStore } from '../../store/useStore';
 import { Button, Field, Input, Switch, Textarea } from '../ui';
 import { RoutineBuilder } from '../diagnostic/RoutineBuilder';
 import { RoutineBuilderCheveux } from '../diagnostic/RoutineBuilderCheveux';
@@ -40,6 +40,7 @@ export function BlockBox({ block, index, count, doc, actions }) {
 
 function BlockEditor({ block, doc, actions }) {
   const meta = BLOCK_LABELS[block.kind];
+  const questions = useStore((s) => s.questions);
   const set = (patch) => actions.setBlockData(block.id, patch);
 
   switch (block.kind) {
@@ -87,7 +88,7 @@ function BlockEditor({ block, doc, actions }) {
         </div>
       );
     case 'diagnostic': {
-      const qs = QUESTIONS[doc.type] || [];
+      const qs = questions[doc.type] || [];
       const n = qs.filter((q) => answerIsFilled(doc.reponses[q.id])).length;
       return <p className="small muted">{meta.aide} {n}/{qs.length} réponse{n > 1 ? 's' : ''} renseignée{n > 1 ? 's' : ''}.</p>;
     }

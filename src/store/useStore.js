@@ -17,13 +17,18 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { buildSeed, SCHEMA_VERSION } from '../data/seed';
 import { uid } from '../lib/ids';
 import { nowISO, todayISO } from '../lib/dates';
-import { pullProduits, pushProduits, pullReglages, pushReglages } from '../lib/sheetsSync';
+import {
+  pullProduits, pushProduits, pullReglages, pushReglages,
+  pullQuestions, pushQuestions, pullConseils, pushConseils,
+} from '../lib/sheetsSync';
 
 export const STORAGE_KEY = 'humana.lite.v1';
 
 const SYNC_DEBOUNCE_MS = 500;
 let produitsSyncTimer = null;
 let reglagesSyncTimer = null;
+let questionsSyncTimer = null;
+let conseilsSyncTimer = null;
 
 /** Push best-effort, debounced : la valeur poussée est celle lue au moment du tir, pas celle de l'appel. */
 function schedulePushProduits(getProduits) {
@@ -34,6 +39,16 @@ function schedulePushProduits(getProduits) {
 function schedulePushReglages(getSettings) {
   clearTimeout(reglagesSyncTimer);
   reglagesSyncTimer = setTimeout(() => { pushReglages(getSettings()); }, SYNC_DEBOUNCE_MS);
+}
+
+function schedulePushQuestions(getQuestions) {
+  clearTimeout(questionsSyncTimer);
+  questionsSyncTimer = setTimeout(() => { pushQuestions(getQuestions()); }, SYNC_DEBOUNCE_MS);
+}
+
+function schedulePushConseils(getConseils) {
+  clearTimeout(conseilsSyncTimer);
+  conseilsSyncTimer = setTimeout(() => { pushConseils(getConseils()); }, SYNC_DEBOUNCE_MS);
 }
 
 export const useStore = create(
@@ -52,10 +67,14 @@ export const useStore = create(
        * localStorage existant reste en place, silencieusement.
        */
       hydrateFromSheet: async () => {
-        const [produitsRes, reglagesRes] = await Promise.all([pullProduits(), pullReglages()]);
+        const [produitsRes, reglagesRes, questionsRes, conseilsRes] = await Promise.all([
+          pullProduits(), pullReglages(), pullQuestions(), pullConseils(),
+        ]);
         set((s) => ({
           produits: produitsRes.ok ? produitsRes.produits : s.produits,
           settings: reglagesRes.ok && reglagesRes.reglages ? { ...s.settings, ...reglagesRes.reglages } : s.settings,
+          questions: questionsRes.ok && questionsRes.questions ? questionsRes.questions : s.questions,
+          conseilsCheveux: conseilsRes.ok && conseilsRes.conseils ? conseilsRes.conseils : s.conseilsCheveux,
         }));
       },
 
@@ -102,13 +121,28 @@ export const useStore = create(
         set((s) => ({ settings: { ...s.settings, ...(typeof patch === 'function' ? patch(s.settings) : patch) } }));
         schedulePushReglages(() => get().settings);
       },
+
+      /** Remplace en entier les questions d'un type de diagnostic ('peau' | 'cheveux'). */
+      updateQuestions: (type, questionsList) => {
+        set((s) => ({ questions: { ...s.questions, [type]: questionsList } }));
+        schedulePushQuestions(() => get().questions);
+      },
+
+      /** Remplace en entier gestes et/ou tips de la bibliothèque de conseils cheveux. */
+      updateConseilsCheveux: (patch) => {
+        set((s) => ({ conseilsCheveux: { ...s.conseilsCheveux, ...(typeof patch === 'function' ? patch(s.conseilsCheveux) : patch) } }));
+        schedulePushConseils(() => get().conseilsCheveux);
+      },
     }),
     {
       name: STORAGE_KEY,
       version: SCHEMA_VERSION,
       storage: createJSONStorage(() => localStorage),
       migrate: (persisted, version) => (version === SCHEMA_VERSION ? persisted : { ...buildSeed(), session: { userId: null } }),
-      partialize: (s) => ({ version: s.version, users: s.users, produits: s.produits, settings: s.settings, session: s.session }),
+      partialize: (s) => ({
+        version: s.version, users: s.users, produits: s.produits, settings: s.settings, session: s.session,
+        questions: s.questions, conseilsCheveux: s.conseilsCheveux,
+      }),
     }
   )
 );

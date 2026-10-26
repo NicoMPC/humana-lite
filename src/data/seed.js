@@ -3,6 +3,8 @@
  * diagnostic, aucun produit d'exemple). Seuls les 2 profils des gérantes et
  * les réglages par défaut sont pré-remplis.
  */
+import { QUESTIONS_DEMO } from './questions';
+import { GESTES_HABITUDES_CHEVEUX, TIPS_CHEVEUX } from './conseilsCheveux';
 
 export const SCHEMA_VERSION = 1;
 
@@ -14,7 +16,6 @@ export const USERS = [
 ];
 
 export const SETTINGS_DEFAULT = {
-  securite: { code: 'Humanabeta' },
   boutique: {
     nom: 'Hu’mana – La Boutique',
     slogan: 'Beauté naturelle',
@@ -35,5 +36,9 @@ export function buildSeed() {
     users: USERS,
     produits: [], // catalogue vierge : import Planity/CSV ou ajout à la main
     settings: SETTINGS_DEFAULT,
+    // Éditables par Jessie/Nathalie (Paramètres → Contenu) ; valeurs par défaut reprises du
+    // contenu réel V1 tant qu'elles n'ont rien personnalisé côté Sheet (voir hydrateFromSheet).
+    questions: { peau: QUESTIONS_DEMO.peau, cheveux: QUESTIONS_DEMO.cheveux },
+    conseilsCheveux: { gestes: GESTES_HABITUDES_CHEVEUX, tips: TIPS_CHEVEUX },
   };
 }

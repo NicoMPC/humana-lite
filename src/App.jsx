@@ -4,10 +4,12 @@ import { useStore, useCurrentUser } from './store/useStore';
 import { AppShell } from './components/layout/AppShell';
 import { Toaster, ConfirmDialog } from './components/ui';
 import LoginPage from './pages/LoginPage';
+import FormulairePreRdvPage from './pages/FormulairePreRdvPage';
 import StudioPage from './pages/StudioPage';
 import ProduitsPage from './pages/ProduitsPage';
 import ReglagesPage from './pages/ReglagesPage';
 import ArchivesPage from './pages/ArchivesPage';
+import ContenuPage from './pages/ContenuPage';
 
 function RequireAuth({ children }) {
   const user = useCurrentUser();
@@ -26,6 +28,7 @@ export default function App() {
     <>
       <Routes>
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+        <Route path="/formulaire-pre-rdv" element={<FormulairePreRdvPage />} />
         <Route
           path="/*"
           element={
@@ -35,6 +38,7 @@ export default function App() {
                     <Route index element={<StudioPage />} />
                     <Route path="archives" element={<ArchivesPage />} />
                     <Route path="produits" element={<ProduitsPage />} />
+                    <Route path="contenu" element={<ContenuPage />} />
                     <Route path="reglages" element={<ReglagesPage />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>

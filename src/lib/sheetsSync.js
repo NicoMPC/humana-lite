@@ -8,9 +8,10 @@
  * d'échec (réseau, token, script indisponible).
  */
 
-// Projet Apps Script LITE autonome (distinct de celui de la boutique) : à renseigner après déploiement.
-const SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycbzCZpsRPNLikVXm1qhyfs8nIsOcM_zmNwXafr0CUrvTaScQJRFsrH2Q6x85BC8LzWNpHg/exec';
-const LITE_TOKEN = 'hl-7Kq2Xw9Rm4Tz';
+// Projet Apps Script LITE autonome (distinct de celui de la boutique), sous essaisautomatisations@gmail.com
+// depuis le 27/10/2026 — classeur dédié, plus le classeur partagé avec la boutique (voir Code.gs).
+const SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycbwBc7gzWLFVBSsbdbxzlitrlz8iRAzXc9PyIo3TRLA3NaebcuJMbgebrPnkpaQxqMIo/exec';
+const LITE_TOKEN = 'hl-9mPz4QtXk7Vb';
 const isConfigured = () => !SHEETS_API_URL.includes('REMPLACER_APRES_DEPLOIEMENT') && LITE_TOKEN !== 'LITE_TOKEN';
 const NOT_CONFIGURED = 'Backend non configuré : renseigner SHEETS_API_URL et LITE_TOKEN dans src/lib/sheetsSync.js après déploiement du script Apps Script.';
 
@@ -241,6 +242,116 @@ export async function pushReglages(reglages) {
     const res = await apiPost('pushReglages', { reglages });
     if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
     return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Formulaire pré-rdv (page publique, sans connexion) : dépose coordonnées + photos
+ * directement dans le Drive (dossier de la cliente, créé si besoin).
+ * -> { ok, clientId, folderUrl, created, photos } ou { ok:false, error }
+ */
+export async function soumettreFormulairePreRdv(payload) {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  try {
+    const res = await apiPost('soumettreFormulairePreRdv', payload);
+    if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
+    return { ok: true, clientId: res.clientId, folderUrl: res.folderUrl, created: res.created, photos: res.photos };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Questions de diagnostic personnalisées -> { ok, questions } (objet { peau, cheveux } ou null) */
+export async function pullQuestions() {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED, questions: null };
+  try {
+    const res = await apiGet('pullQuestions');
+    if (!res?.ok) return { ok: false, error: res?.error || 'Réponse inattendue du backend', questions: null };
+    return { ok: true, questions: res.questions || null };
+  } catch (err) {
+    return { ...fail(err), questions: null };
+  }
+}
+
+/** Remplace en entier les questions de diagnostic personnalisées. -> { ok } */
+export async function pushQuestions(questions) {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  try {
+    const res = await apiPost('pushQuestions', { questions });
+    if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Bibliothèque de conseils personnalisée -> { ok, conseils } (objet { gestes, tips } ou null) */
+export async function pullConseils() {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED, conseils: null };
+  try {
+    const res = await apiGet('pullConseils');
+    if (!res?.ok) return { ok: false, error: res?.error || 'Réponse inattendue du backend', conseils: null };
+    return { ok: true, conseils: res.conseils || null };
+  } catch (err) {
+    return { ...fail(err), conseils: null };
+  }
+}
+
+/** Remplace en entier la bibliothèque de conseils personnalisée. -> { ok } */
+export async function pushConseils(conseils) {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  try {
+    const res = await apiPost('pushConseils', { conseils });
+    if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Dossier cliente complet (Lot 5) : remplace en entier un ou plusieurs champs permanents
+ * du dossier (allergies, grossesse, traitements, consentement, notesSuivi,
+ * syntheseProfessionnelle). payload : { clientId, ...champs }. -> { ok } ou { ok:false, error }
+ */
+export async function pushFicheClient(payload) {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  try {
+    const res = await apiPost('pushFicheClient', payload);
+    if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Bilan à 6 semaines : ajoute une photo avant/après dans le Drive de la cliente.
+ * -> { ok, photo, bilanSixSemaines } ou { ok:false, error }
+ */
+export async function ajouterPhotoBilan({ clientId, moment, dataUrl, notes }) {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  try {
+    const res = await apiPost('ajouterPhotoBilan', { clientId, moment, dataUrl, notes });
+    if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
+    return { ok: true, photo: res.photo, bilanSixSemaines: res.bilanSixSemaines };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Connexion personnelle (Lot 4) : vérifie identifiant + mot de passe côté serveur
+ * (Apps Script), jamais côté client. -> { ok, userId, prenom } ou { ok:false, error }
+ */
+export async function login(identifiant, motDePasse) {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  try {
+    const res = await apiPost('login', { identifiant, motDePasse });
+    if (!res?.ok) return { ok: false, error: res?.error || 'Identifiant ou mot de passe incorrect.' };
+    return { ok: true, userId: res.userId, prenom: res.prenom };
   } catch (err) {
     return fail(err);
   }

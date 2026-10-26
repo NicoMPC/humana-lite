@@ -8,15 +8,13 @@
  * Option C (déjà acquise par les deux gérantes) : un réglage global peut
  * forcer une validation humaine avant départ réel de chaque e-mail.
  *
- * Projet Apps Script AUTONOME (pas celui de la boutique) : il ouvre le
- * classeur partagé par id (SPREADSHEET_ID) mais n'utilise que ses propres
- * onglets, créés automatiquement s'ils manquent. Il ne lit ni n'écrit jamais
- * Clientes / Diagnostics / Produits / Settings (onglets DE LA BOUTIQUE, même
- * classeur, projet Apps Script séparé) : c'est pour ça que l'onglet produits
- * du Lite s'appelle `LiteProduits` et non `Produits` — un nom identique
- * pointerait vers l'onglet réel de la boutique et écraserait ses données en
- * production. `Reglages` (français) ne collisionne pas avec `Settings`
- * (anglais) de la boutique, donc gardé tel quel.
+ * Projet Apps Script AUTONOME (pas celui de la boutique), sous le compte
+ * essaisautomatisations@gmail.com depuis le 27/10/2026. Classeur dédié à Lite
+ * (SPREADSHEET_ID), plus le classeur partagé avec la boutique — abandonné
+ * parce que son propriétaire avait le stockage plein, ce qui bloquait toute
+ * écriture (lecture seule possible) malgré un partage en Éditeur. Les noms
+ * `LiteProduits`/`Reglages` ont été gardés tels quels par cohérence avec le
+ * reste du code, même si ce classeur n'est plus partagé avec la boutique.
  *   ArchClientes  : id | cle | prenom | nom | email | folderUrl | date_creation | json
  *   ArchDocuments : id | client_id | type | date | auteur | url | nom | json
  *   EnvoisEnAttente : id | client_id | email | prenom | sujet | date_creation | statut | auteur | json
@@ -61,18 +59,37 @@
  *           POST modifierRelance -> { ok } ou { ok:false, error }  (sujet/corps, verrouillé à J-1)
  *           POST pushProduits -> { ok }  (payload { produits:[...] }, remplace tout le catalogue)
  *           POST pushReglages -> { ok }  (payload { reglages:{...} }, document unique)
+ *           POST login -> { ok, userId, prenom } ou { ok:false, error }  (payload { identifiant, motDePasse })
+ *           POST soumettreFormulairePreRdv -> { ok, clientId, folderUrl, created, photos }
+ *             (payload { client:{prenom,nom,telephone,email}, motif, dateSouhaitee, notes, photos:[dataUrl,...] })
+ *           POST pushFicheClient -> { ok }  (payload { clientId, allergies?, grossesse?, traitements?,
+ *             consentement?, notesSuivi?, syntheseProfessionnelle? } — chaque champ fourni remplace sa valeur)
+ *           POST ajouterPhotoBilan -> { ok, photo, bilanSixSemaines }  (payload { clientId, moment:'avant'|'apres', dataUrl, notes? })
+ *           GET  pullQuestions -> { ok, questions }  (objet { peau, cheveux }, ou null si jamais personnalisé)
+ *           POST pushQuestions -> { ok }  (payload { questions:{...} }, document unique, remplace tout)
+ *           GET  pullConseils -> { ok, conseils }  (objet { gestes, tips }, ou null si jamais personnalisé)
+ *           POST pushConseils -> { ok }  (payload { conseils:{...} }, document unique, remplace tout)
+ *
+ * Connexion personnelle (Lot 4) : exécuter UNE FOIS `initialiserMotsDePasseTemp_`
+ * depuis l'éditeur pour poser les mots de passe temporaires (voir son commentaire).
  */
 
-const SPREADSHEET_ID = '1SrQZBSWigFrw3H62_j56iRowGgWXOFfJZGMZG2UO83U';
+// Classeur dédié à Lite (créé le 27/10/2026 sous essaisautomatisations@gmail.com) : plus le
+// classeur partagé avec humana-boutique — celui-ci était possédé par un compte dont le stockage
+// était plein, ce qui bloquait toute écriture (lecture OK, écriture refusée) malgré un partage en
+// Éditeur correct. Ici le classeur est possédé directement par le compte qui exécute le script.
+const SPREADSHEET_ID = '1fxbv0dfItF_SDzO26idtSFg2Oec3eMKVbJ2rTrReZ3E';
 const SHEETS = {
   clients: 'ArchClientes',
   documents: 'ArchDocuments',
   pending: 'EnvoisEnAttente',
   relances: 'RelanceQueue',
-  // Noms distincts des onglets `Produits`/`Settings` de la boutique (même classeur,
-  // autre projet Apps Script) : un nom identique écrirait dans ses onglets réels.
+  // Noms distincts des onglets `Produits`/`Settings` de la boutique — gardés même si ce classeur
+  // n'est plus partagé avec elle, pour rester cohérent avec le reste du code et la doc.
   produits: 'LiteProduits',
   reglages: 'Reglages',
+  questions: 'LiteQuestions',
+  conseils: 'LiteConseils',
 };
 const HEADERS = {
   ArchClientes: ['id', 'cle', 'prenom', 'nom', 'email', 'folderUrl', 'date_creation', 'json'],
@@ -81,10 +98,17 @@ const HEADERS = {
   RelanceQueue: ['id', 'client_id', 'email', 'prenom', 'date_envoi_diag', 'date_relance_prevue', 'statut', 'auteur', 'json'],
   LiteProduits: ['id', 'nom', 'reference', 'prix', 'categorie', 'actif', 'stock', 'json'],
   Reglages: ['id', 'boutique_nom', 'date_maj', 'json'],
+  LiteQuestions: ['id', 'date_maj', 'json'],
+  LiteConseils: ['id', 'date_maj', 'json'],
 };
 
 // Id fixe de l'unique ligne de réglages (pas une liste, un seul document partagé).
 const REGLAGES_ID = 'reglages';
+// Même principe pour les questions de diagnostic et la bibliothèque de conseils
+// (Lot « éditeur de questions/conseils ») : un seul document partagé par les 2 postes,
+// remplacé en entier à chaque sauvegarde (cohérent avec pushProduits/pushReglages).
+const QUESTIONS_ID = 'questions';
+const CONSEILS_ID = 'conseils';
 const ROOT_FOLDER_NAME = "Archives Hu'mana";
 const MAX_BASE64_LENGTH = 35 * 1024 * 1024;
 
@@ -123,6 +147,64 @@ function getToken_() {
 function checkToken_(token) {
   const expected = getToken_();
   if (!expected || token !== expected) throw new Error('Token invalide');
+}
+
+/**
+ * Connexion personnelle (Lot 4) : chaque gérante a son identifiant + mot de passe,
+ * vérifiés ici, jamais côté client (le bundle public ne doit plus contenir aucun
+ * secret). Mots de passe stockés hashés (SHA-256) dans les Script Properties,
+ * clé `AUTH_<identifiant>`. HYPOTHÈSE À REMPLACER : les mots de passe posés par
+ * `initialiserMotsDePasseTemp_` sont temporaires, à communiquer une fois à Jessie
+ * et Nathalie puis à faire remplacer (pas d'UI de changement de mot de passe pour
+ * l'instant, non promise par le devis — à construire si elles le demandent).
+ */
+const UTILISATRICES = [
+  { identifiant: 'jessie', userId: 'u-jessie', prenom: 'Jessie' },
+  { identifiant: 'nathalie', userId: 'u-nathalie', prenom: 'Nathalie' },
+];
+// Mots de passe temporaires HYPOTHÉTIQUES, posés une seule fois par
+// initialiserMotsDePasseTemp_ (jamais écrasés si déjà configurés) — à remplacer.
+const MOTS_DE_PASSE_TEMP_HYPOTHESE = { jessie: 'Jessie-Humana-2026', nathalie: 'Nathalie-Humana-2026' };
+
+function hashMotDePasse_(motDePasse) {
+  const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(motDePasse || ''), Utilities.Charset.UTF_8);
+  return digest.map((b) => ('0' + (b & 0xff).toString(16)).slice(-2)).join('');
+}
+
+/** Pose les mots de passe temporaires HYPOTHÈSE s'ils n'existent pas encore. Ne touche
+ * jamais un mot de passe déjà configuré (changé depuis) — idempotent et sûr à
+ * relancer par erreur. Appelée via le raccourci visible `initialiserMotsDePasse`
+ * ci-dessous (même piège que debugDrive_/autoriserAccesTemp : Apps Script masque
+ * du menu Exécuter toute fonction qui se termine par « _ »).
+ */
+function initialiserMotsDePasseTemp_() {
+  const props = PropertiesService.getScriptProperties();
+  const resultat = {};
+  UTILISATRICES.forEach((u) => {
+    const cle = 'AUTH_' + u.identifiant;
+    if (props.getProperty(cle)) { resultat[u.identifiant] = 'déjà configuré, inchangé'; return; }
+    const motDePasse = MOTS_DE_PASSE_TEMP_HYPOTHESE[u.identifiant];
+    props.setProperty(cle, hashMotDePasse_(motDePasse));
+    resultat[u.identifiant] = motDePasse; // en clair UNE fois, pour transmission à l'utilisatrice
+  });
+  return resultat;
+}
+
+/** Raccourci visible dans le menu « Exécuter » — sélectionner CETTE fonction (pas
+ * `initialiserMotsDePasseTemp_`, cachée). À exécuter UNE SEULE FOIS. */
+function initialiserMotsDePasse() {
+  return initialiserMotsDePasseTemp_();
+}
+
+function login_(identifiant, motDePasse) {
+  const id = String(identifiant || '').trim().toLowerCase();
+  const u = UTILISATRICES.find((x) => x.identifiant === id);
+  if (!u) throw new Error('Identifiant ou mot de passe incorrect.');
+  const hashAttendu = PropertiesService.getScriptProperties().getProperty('AUTH_' + id);
+  if (!hashAttendu || hashAttendu !== hashMotDePasse_(motDePasse)) {
+    throw new Error('Identifiant ou mot de passe incorrect.');
+  }
+  return { userId: u.userId, prenom: u.prenom };
 }
 
 function json_(obj) {
@@ -321,6 +403,171 @@ function archivePdf_(p) {
   }
 }
 
+const MAX_PHOTOS_PRE_RDV = 6;
+
+/**
+ * Formulaire pré-rdv (devis : « Un formulaire part vers la cliente avant le
+ * rendez-vous : coordonnées et photos, déposées directement dans votre Drive »).
+ * Page PUBLIQUE côté appli (pas de connexion) : la cliente remplit elle-même,
+ * donc validation stricte ici — aucune confiance dans ce qui arrive.
+ *
+ * HYPOTHÈSE DE CHAMPS À VALIDER AVEC NATHALIE (le devis ne détaille pas la
+ * liste exacte) : prénom/nom/téléphone/email, motif (cheveux|peau|les-deux),
+ * date souhaitée, note libre, jusqu'à 6 photos. Si Nathalie veut d'autres
+ * champs, les ajouter ici ET dans src/pages/FormulairePreRdvPage.jsx.
+ *
+ * payload : { client:{prenom,nom,telephone,email}, motif, dateSouhaitee, notes, photos:[dataUrl,...] }
+ */
+function soumettreFormulairePreRdv_(p) {
+  if (!p || typeof p !== 'object') throw new Error('Requête vide');
+  const c = p.client || {};
+  const prenom = cleanName_(c.prenom);
+  const nom = cleanName_(c.nom);
+  if (!prenom) throw new Error('Prénom manquant');
+  if (!nom) throw new Error('Nom manquant');
+  const telephone = cleanName_(c.telephone);
+  const email = cleanName_(c.email);
+  if (!telephone && !email) throw new Error('Un téléphone ou un email est nécessaire pour vous recontacter.');
+
+  const photosIn = Array.isArray(p.photos) ? p.photos.slice(0, MAX_PHOTOS_PRE_RDV) : [];
+  const photoBlobs = photosIn.map((dataUrl, i) => {
+    const m = /^data:([^;,]+)?(?:;[^;,]+)*;base64,(.+)$/.exec(String(dataUrl || ''));
+    if (!m) throw new Error('Photo ' + (i + 1) + ' invalide.');
+    if (m[2].length > MAX_BASE64_LENGTH) throw new Error('Photo ' + (i + 1) + ' trop volumineuse.');
+    const type = (m[1] && m[1].indexOf('image/') === 0) ? m[1] : 'image/jpeg';
+    return Utilities.newBlob(Utilities.base64Decode(m[2]), type, 'photo-pre-rdv-' + (i + 1) + '.jpg');
+  });
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const key = clientKey_(prenom, nom);
+    const clients = readAll_(SHEETS.clients);
+    let client = clients.find((x) => x && x.cle === key);
+    let created = false;
+    let folder = null;
+    if (client && client.folderId) {
+      try { folder = DriveApp.getFolderById(client.folderId); if (folder.isTrashed()) folder = null; } catch (e) { folder = null; }
+    }
+    if (!folder) folder = getClientFolder_(getRootFolder_(), nom + ' ' + prenom);
+
+    if (!client) {
+      created = true;
+      client = { id: uid_('cli'), prenom, nom, email, cle: key, date_creation: new Date().toISOString() };
+    } else if (!client.email && email) {
+      client.email = email;
+    }
+    client.folderId = folder.getId();
+    client.folderUrl = folder.getUrl();
+    upsert_(SHEETS.clients, client, {
+      prenom: client.prenom, nom: client.nom, email: client.email || '',
+      date_creation: client.date_creation || '', cle: client.cle, folderUrl: client.folderUrl,
+    });
+
+    const photoUrls = photoBlobs.map((blob) => {
+      const file = folder.createFile(blob);
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      return { url: file.getUrl(), fileId: file.getId() };
+    });
+
+    const doc = {
+      id: uid_('doc'), client_id: client.id, type: 'formulaire-pre-rdv',
+      date: dateStr_(new Date()), auteur: 'Cliente (formulaire)', lieu: '',
+      url: photoUrls[0]?.url || client.folderUrl, nom: 'Formulaire pré-rdv', fileId: photoUrls[0]?.fileId || '',
+    };
+    doc.composerDoc = clampComposerDoc_({
+      telephone, email, motif: cleanName_(p.motif), dateSouhaitee: cleanName_(p.dateSouhaitee),
+      notes: cleanName_(p.notes), photos: photoUrls,
+    });
+    upsert_(SHEETS.documents, doc, {
+      client_id: doc.client_id, type: doc.type, date: doc.date, auteur: doc.auteur, url: doc.url, nom: doc.nom,
+    });
+    SpreadsheetApp.flush();
+    return { clientId: client.id, folderUrl: client.folderUrl, created, photos: photoUrls.length };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ---------------------------------------------------------------------- *
+ * Dossier cliente complet (Lot 5 — Option B) : champs permanents du dossier,
+ * distincts des réponses de diagnostic (ArchClientes.json fait foi, comme pour
+ * folderId/folderUrl déjà stockés là — pas de nouvel onglet nécessaire).
+ * ---------------------------------------------------------------------- */
+
+const CHAMPS_FICHE_CLIENT = ['allergies', 'grossesse', 'traitements', 'consentement', 'notesSuivi', 'syntheseProfessionnelle'];
+
+/**
+ * payload : { clientId, allergies?, grossesse?, traitements?, consentement?:{ok,date},
+ *             notesSuivi?:[{id,date,texte,auteur}], syntheseProfessionnelle?:{besoins,routinesProposees,routineChoisie} }
+ * Chaque champ fourni REMPLACE sa valeur précédente en entier (le client renvoie l'état
+ * complet du champ, comme pour pushProduits/pushReglages) ; les champs absents du payload
+ * ne sont pas touchés.
+ */
+function pushFicheClient_(p) {
+  if (!p || !p.clientId) throw new Error('clientId manquant');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const clients = readAll_(SHEETS.clients);
+    const client = clients.find((x) => x && x.id === p.clientId);
+    if (!client) throw new Error('Cliente introuvable');
+    CHAMPS_FICHE_CLIENT.forEach((k) => { if (p[k] !== undefined) client[k] = p[k]; });
+    upsert_(SHEETS.clients, client, {
+      prenom: client.prenom, nom: client.nom, email: client.email || '',
+      date_creation: client.date_creation || '', cle: client.cle, folderUrl: client.folderUrl,
+    });
+    SpreadsheetApp.flush();
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Bilan à 6 semaines (promesse du Lot 5) : ajoute UNE photo avant/après dans le dossier
+ * Drive de la cliente et l'indexe dans client.bilanSixSemaines. payload : { clientId,
+ * moment:'avant'|'apres', dataUrl, notes? }. -> { ok, photo, bilanSixSemaines }
+ */
+function ajouterPhotoBilan_(p) {
+  if (!p || !p.clientId) throw new Error('clientId manquant');
+  const moment = p.moment === 'apres' ? 'apres' : 'avant';
+  const m = /^data:([^;,]+)?(?:;[^;,]+)*;base64,(.+)$/.exec(String(p.dataUrl || ''));
+  if (!m) throw new Error('Photo invalide (base64 attendu).');
+  if (m[2].length > MAX_BASE64_LENGTH) throw new Error('Photo trop volumineuse.');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const clients = readAll_(SHEETS.clients);
+    const client = clients.find((x) => x && x.id === p.clientId);
+    if (!client) throw new Error('Cliente introuvable.');
+    let folder;
+    try { folder = DriveApp.getFolderById(client.folderId); } catch (e) { throw new Error('Dossier Drive introuvable pour cette cliente.'); }
+
+    const type = (m[1] && m[1].indexOf('image/') === 0) ? m[1] : 'image/jpeg';
+    const blob = Utilities.newBlob(Utilities.base64Decode(m[2]), type, 'bilan-6-semaines-' + moment + '-' + Date.now() + '.jpg');
+    const file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    const photo = { url: file.getUrl(), fileId: file.getId(), date: dateStr_(new Date()) };
+
+    const bilan = client.bilanSixSemaines || { photosAvant: [], photosApres: [], notes: '' };
+    if (moment === 'avant') bilan.photosAvant = (bilan.photosAvant || []).concat([photo]);
+    else bilan.photosApres = (bilan.photosApres || []).concat([photo]);
+    if (p.notes !== undefined) bilan.notes = cleanName_(p.notes);
+    client.bilanSixSemaines = bilan;
+
+    upsert_(SHEETS.clients, client, {
+      prenom: client.prenom, nom: client.nom, email: client.email || '',
+      date_creation: client.date_creation || '', cle: client.cle, folderUrl: client.folderUrl,
+    });
+    SpreadsheetApp.flush();
+    return { photo, bilanSixSemaines: bilan };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /* ---------------------------------------------------------------------- *
  * Catalogue produits + réglages boutique, partagés entre les 2 postes
  * ---------------------------------------------------------------------- */
@@ -370,6 +617,53 @@ function pushReglages_(reglages) {
       boutique_nom: (obj.boutique && obj.boutique.nom) || '',
       date_maj: new Date().toISOString(),
     });
+    SpreadsheetApp.flush();
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ---------------------------------------------------------------------- *
+ * Questions de diagnostic + bibliothèque de conseils, éditables par Jessie et
+ * Nathalie (devis : « vous ajoutez, modifiez et réordonnez vos questions et
+ * votre bibliothèque de conseils vous-même, à tout moment »). Même principe
+ * que les réglages : document unique, remplacé en entier à chaque sauvegarde.
+ * ---------------------------------------------------------------------- */
+
+/** { peau: [...], cheveux: [...] } ou null si jamais personnalisé (l'appli garde alors ses valeurs par défaut). */
+function pullQuestions_() {
+  const all = readAll_(SHEETS.questions);
+  return all.find((r) => r && r.id === QUESTIONS_ID) || null;
+}
+
+function pushQuestions_(questions) {
+  if (!questions || typeof questions !== 'object') throw new Error('Questions invalides');
+  const obj = Object.assign({}, questions, { id: QUESTIONS_ID });
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    upsert_(SHEETS.questions, obj, { date_maj: new Date().toISOString() });
+    SpreadsheetApp.flush();
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** { gestes: [{categorie, items:[...]}], tips: [...] } ou null si jamais personnalisé. */
+function pullConseils_() {
+  const all = readAll_(SHEETS.conseils);
+  return all.find((r) => r && r.id === CONSEILS_ID) || null;
+}
+
+function pushConseils_(conseils) {
+  if (!conseils || typeof conseils !== 'object') throw new Error('Conseils invalides');
+  const obj = Object.assign({}, conseils, { id: CONSEILS_ID });
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    upsert_(SHEETS.conseils, obj, { date_maj: new Date().toISOString() });
     SpreadsheetApp.flush();
     return { ok: true };
   } finally {
@@ -710,6 +1004,12 @@ function doGet(e) {
     if (action === 'pullReglages') {
       return json_({ ok: true, reglages: pullReglages_() });
     }
+    if (action === 'pullQuestions') {
+      return json_({ ok: true, questions: pullQuestions_() });
+    }
+    if (action === 'pullConseils') {
+      return json_({ ok: true, conseils: pullConseils_() });
+    }
     return json_({ ok: false, error: 'Action inconnue : ' + action });
   } catch (err) {
     return json_({ ok: false, error: errMsg_(err) });
@@ -724,6 +1024,14 @@ function doPost(e) {
     const action = body.action;
     const payload = body.payload;
     switch (action) {
+      case 'login':
+        return json_(Object.assign({ ok: true }, login_(payload && payload.identifiant, payload && payload.motDePasse)));
+      case 'soumettreFormulairePreRdv':
+        return json_(Object.assign({ ok: true }, soumettreFormulairePreRdv_(payload)));
+      case 'pushFicheClient':
+        return json_(pushFicheClient_(payload));
+      case 'ajouterPhotoBilan':
+        return json_(Object.assign({ ok: true }, ajouterPhotoBilan_(payload)));
       case 'archivePdf':
         return json_(Object.assign({ ok: true }, archivePdf_(payload)));
       case 'archiveEtEnvoyer':
@@ -740,6 +1048,10 @@ function doPost(e) {
         return json_(Object.assign({ ok: true }, pushProduits_(payload && payload.produits)));
       case 'pushReglages':
         return json_(Object.assign({ ok: true }, pushReglages_(payload && payload.reglages)));
+      case 'pushQuestions':
+        return json_(Object.assign({ ok: true }, pushQuestions_(payload && payload.questions)));
+      case 'pushConseils':
+        return json_(Object.assign({ ok: true }, pushConseils_(payload && payload.conseils)));
       default:
         return json_({ ok: false, error: 'Action inconnue : ' + action });
     }

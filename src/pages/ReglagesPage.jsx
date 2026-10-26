@@ -9,17 +9,15 @@ const FIELDS = [
   ['email', 'Email'], ['site', 'Site web'], ['instagram', 'Instagram'],
 ];
 
-/** Réglages : coordonnées de la boutique, message de fin par défaut, code d'accès. */
+/** Réglages : coordonnées de la boutique, message de fin par défaut. */
 export default function ReglagesPage() {
   const settings = useStore((s) => s.settings);
   const updateSettings = useStore((s) => s.updateSettings);
   const [boutique, setBoutique] = useState({ ...settings.boutique });
   const [footer, setFooter] = useState(settings.footerMessage || '');
-  const [code, setCode] = useState(settings.securite?.code || '');
 
   const save = () => {
-    if (!code.trim()) return toast('Le code d’accès ne peut pas être vide.', { type: 'warning' });
-    updateSettings({ boutique, footerMessage: footer, securite: { ...settings.securite, code: code.trim() } });
+    updateSettings({ boutique, footerMessage: footer });
     toast('Réglages enregistrés — ils s’appliquent aux prochains documents.');
   };
 
@@ -50,13 +48,6 @@ export default function ReglagesPage() {
           <div className="card-header"><div><div className="eyebrow">Document</div><h3>Signature / message de fin</h3></div></div>
           <Field hint="Message affiché en bas de chaque PDF, modifiable dans chaque document.">
             {(id) => <Textarea id={id} rows={3} value={footer} onChange={(e) => setFooter(e.target.value)} />}
-          </Field>
-        </div>
-
-        <div className="card">
-          <div className="card-header"><div><div className="eyebrow">Sécurité</div><h3>Code d’accès</h3></div></div>
-          <Field label="Code partagé" hint="Demandé à l’ouverture de l’application, avant le choix du profil (Jessie / Nathalie).">
-            {(id) => <Input id={id} value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" />}
           </Field>
         </div>
 

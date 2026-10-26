@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { produitsActifs, toDocProduit } from '../../store/selectors';
 import { normalize } from '../../lib/format';
-import { GESTES_HABITUDES_CHEVEUX, TIPS_CHEVEUX } from '../../data/conseilsCheveux';
 import { Button, SearchBar } from '../ui';
 
 /**
@@ -14,6 +13,9 @@ import { Button, SearchBar } from '../ui';
  * Pour la routine peau (matin/soir/hebdo), voir RoutineBuilder.jsx.
  */
 export function RoutineBuilderCheveux({ data, onChange }) {
+  const conseilsCheveux = useStore((s) => s.conseilsCheveux);
+  const GESTES_HABITUDES_CHEVEUX = conseilsCheveux.gestes;
+  const TIPS_CHEVEUX = conseilsCheveux.tips;
   const soinsProfonds = { hebdo: [], mensuel: [], trimestriel: [], ...(data.soinsProfonds || {}) };
 
   return (

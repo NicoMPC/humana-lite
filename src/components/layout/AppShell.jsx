@@ -8,10 +8,11 @@ const NAV = [
   { to: '/', label: 'Nouveau document', icon: 'fa-solid fa-file-circle-plus', end: true },
   { to: '/archives', label: 'Archives', icon: 'fa-solid fa-box-archive' },
   { to: '/produits', label: 'Produits', icon: 'fa-solid fa-box-open' },
+  { to: '/contenu', label: 'Contenu', icon: 'fa-solid fa-list-check' },
   { to: '/reglages', label: 'Réglages', icon: 'fa-solid fa-sliders' },
 ];
 
-export const TITLES = [[/^\/$/, 'Nouveau document'], [/^\/archives/, 'Archives'], [/^\/produits/, 'Produits'], [/^\/reglages/, 'Réglages']];
+export const TITLES = [[/^\/$/, 'Nouveau document'], [/^\/archives/, 'Archives'], [/^\/produits/, 'Produits'], [/^\/contenu/, 'Contenu'], [/^\/reglages/, 'Réglages']];
 export const pageLabel = (pathname) => TITLES.find(([re]) => re.test(pathname))?.[1] || 'Humana';
 
 export function AppShell({ children }) {

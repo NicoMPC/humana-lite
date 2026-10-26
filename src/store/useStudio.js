@@ -24,7 +24,7 @@ const emptyData = (kind, footerMessage, type) => {
 
 /** Construit un doc vierge (blocs par défaut selon le type). */
 export function newDoc(type, auteur) {
-  const { settings } = useStore.getState();
+  const { settings, questions } = useStore.getState();
   const footerMessage = settings.footerMessage || '';
   return {
     type,
@@ -34,6 +34,10 @@ export function newDoc(type, auteur) {
     boutique: { ...settings.boutique },
     footerMessage,
     reponses: {},
+    // Snapshot des questions au moment de la création : un document déjà envoyé garde les
+    // questions telles qu'elles étaient alors, même si Jessie/Nathalie les modifient ensuite
+    // dans Paramètres → Contenu (voir lib/pdf/index.js qui lit doc.questions).
+    questions: questions[type] || [],
     blocks: DEFAULT_KINDS[type].map((kind) => ({ id: kind, kind, on: true, data: emptyData(kind, footerMessage, type) })),
   };
 }

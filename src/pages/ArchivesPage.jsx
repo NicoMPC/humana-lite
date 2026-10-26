@@ -6,6 +6,7 @@ import { formatDate } from '../lib/dates';
 import { toast, confirmDialog } from '../store/useUI';
 import { useStudio } from '../store/useStudio';
 import { Avatar, Badge, Button, EmptyState, Field, Input, Modal, Notice, SearchBar, SkeletonCard, Textarea } from '../components/ui';
+import DossierClientPanel from '../components/archives/DossierClientPanel';
 
 const TYPE_LABELS = { peau: 'Peau', cheveux: 'Cheveux', lifestyle: 'Lifestyle' };
 const typeLabel = (t) => TYPE_LABELS[String(t || '').toLowerCase()] || t || 'Document';
@@ -186,6 +187,7 @@ export default function ArchivesPage() {
                     <i className="fa-brands fa-google-drive" aria-hidden="true" /> Ouvrir le dossier Drive
                   </a>
                 )}
+                <DossierClientPanel client={selected} onSaved={load} />
                 <div className="divider" />
                 {selectedDocs.length === 0 && <p className="small muted">Aucun document pour cette cliente.</p>}
                 {selectedDocs.map((d) => (
