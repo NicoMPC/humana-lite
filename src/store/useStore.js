@@ -72,7 +72,12 @@ export const useStore = create(
         ]);
         set((s) => ({
           produits: produitsRes.ok ? produitsRes.produits : s.produits,
-          settings: reglagesRes.ok && reglagesRes.reglages ? { ...s.settings, ...reglagesRes.reglages } : s.settings,
+          // Fusion imbriquée sur `boutique` (pas un simple écrasement au 1er niveau) : un
+          // champ ajouté au défaut local (ex. avisLien, 27/10) ne doit pas disparaître juste
+          // parce que le Sheet garde encore une ancienne version de l'objet sans ce champ.
+          settings: reglagesRes.ok && reglagesRes.reglages
+            ? { ...s.settings, ...reglagesRes.reglages, boutique: { ...s.settings.boutique, ...(reglagesRes.reglages.boutique || {}) } }
+            : s.settings,
           questions: questionsRes.ok && questionsRes.questions ? questionsRes.questions : s.questions,
           conseilsCheveux: conseilsRes.ok && conseilsRes.conseils ? conseilsRes.conseils : s.conseilsCheveux,
         }));
