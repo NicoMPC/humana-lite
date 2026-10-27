@@ -24,6 +24,10 @@ export const SETTINGS_DEFAULT = {
     email: 'contact@humana-boutique.fr',
     site: 'www.humana-boutique.fr',
     instagram: '@humana.laboutique',
+    // Lien d'avis Google (relance J+14) : valeur par défaut trouvée par Nicolas
+    // le 27/10/2026 (fiche Google Business "HU"MANA Massages et Beauté Naturelle),
+    // modifiable à tout moment dans Réglages → Fidélisation.
+    avisLien: 'https://www.google.com/maps/place/HU%22MANA+Massages+et+Beaut%C3%A9+Naturelle/@44.549656,4.4343391,525m/data=!3m1!1e3!4m8!3m7!1s0x12b4df463e443ec3:0x133d2cd29ec6fdec!8m2!3d44.549656!4d4.436914!9m1!1b1!16s%2Fg%2F11p67_p4bv',
   },
   // Message de fin par défaut (= « signature » du PDF) ; repris dans chaque nouveau document.
   footerMessage: 'Prenez soin de vous, simplement.',
