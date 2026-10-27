@@ -65,8 +65,8 @@ export function RoutineBuilderCheveux({ data, onChange }) {
         allowGeste
       />
 
-      <RubriqueGestes value={data.gestes || []} onChange={(gestes) => onChange({ gestes })} />
-      <RubriqueTips value={data.tips || []} onChange={(tips) => onChange({ tips })} />
+      <RubriqueGestes value={data.gestes || []} onChange={(gestes) => onChange({ gestes })} gestesHabitudes={GESTES_HABITUDES_CHEVEUX} />
+      <RubriqueTips value={data.tips || []} onChange={(tips) => onChange({ tips })} tipsCheveux={TIPS_CHEVEUX} />
     </div>
   );
 }
@@ -226,7 +226,7 @@ function EtapeListEditor({ value, onChange, fields, allowGeste }) {
 
 /* ───────────────────────── 6. Mes gestes & habitudes ───────────────────────── */
 
-function RubriqueGestes({ value, onChange }) {
+function RubriqueGestes({ value, onChange, gestesHabitudes }) {
   const [openLib, setOpenLib] = useState(false);
   const isOn = (categorie, texte) => value.some((g) => g.categorie === categorie && g.texte === texte);
   const toggle = (categorie, texte) => {
@@ -243,11 +243,11 @@ function RubriqueGestes({ value, onChange }) {
       <p className="xs muted">Conseils liés au quotidien, au matériel, à la nuit, au sport, aux baignades, au soleil, à la chaleur. Remplace les anciennes rubriques séparées « nuit », « sport », « piscine » et « cas particuliers ».</p>
       <button type="button" className="library-toggle" onClick={() => setOpenLib((o) => !o)}>
         <i className={`fa-solid fa-chevron-${openLib ? 'down' : 'right'}`} />
-        Choisir dans la bibliothèque ({GESTES_HABITUDES_CHEVEUX.reduce((n, c) => n + c.items.length, 0)} formulations)
+        Choisir dans la bibliothèque ({gestesHabitudes.reduce((n, c) => n + c.items.length, 0)} formulations)
       </button>
       {openLib && (
         <div className="library-groups">
-          {GESTES_HABITUDES_CHEVEUX.map((cat) => (
+          {gestesHabitudes.map((cat) => (
             <div key={cat.categorie} className="library-group">
               <h5>{cat.categorie}</h5>
               <div className="options-grid">
@@ -283,7 +283,7 @@ function RubriqueGestes({ value, onChange }) {
 
 /* ───────────────────────── 7. Mes tips à ne pas oublier ───────────────────────── */
 
-function RubriqueTips({ value, onChange }) {
+function RubriqueTips({ value, onChange, tipsCheveux }) {
   const [openLib, setOpenLib] = useState(false);
   const isOn = (texte) => value.includes(texte);
   const toggle = (texte) => onChange(isOn(texte) ? value.filter((t) => t !== texte) : [...value, texte]);
@@ -296,12 +296,12 @@ function RubriqueTips({ value, onChange }) {
       <p className="xs muted">3 à 6 rappels maximum, courts et chaleureux — un pense-bête, pas un règlement intérieur. {value.length} sélectionné{value.length > 1 ? 's' : ''}.</p>
       <button type="button" className="library-toggle" onClick={() => setOpenLib((o) => !o)}>
         <i className={`fa-solid fa-chevron-${openLib ? 'down' : 'right'}`} />
-        Choisir dans la bibliothèque ({TIPS_CHEVEUX.length} formulations)
+        Choisir dans la bibliothèque ({tipsCheveux.length} formulations)
       </button>
       {openLib && (
         <div className="library-groups">
           <div className="options-grid">
-            {TIPS_CHEVEUX.map((texte) => {
+            {tipsCheveux.map((texte) => {
               const checked = isOn(texte);
               return (
                 <label key={texte} className={`option ${checked ? 'is-checked' : ''}`}>
