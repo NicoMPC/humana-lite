@@ -10,7 +10,7 @@ doc = {
   theme: 'sauge' | 'argile' | 'ardoise',
   client: { id?: string, prenom: string, nom: string, email?: string },
   meta: { date: 'YYYY-MM-DD', auteur: 'Jessie' | 'Nathalie' | string, lieu: 'boutique' | 'visio' },
-  boutique: { nom, slogan, adresse, telephone, email, site, instagram },
+  boutique: { nom, slogan, adresse, telephone, email, site, instagram, avisLien },
   footerMessage: string,            // message de fin, éditable
   reponses: { [questionId]: string | string[] },   // diagnostic (vide pour lifestyle)
   blocks: [ { id: string, kind: BlockKind, on: boolean, data: object } ]   // l'ORDRE du tableau = ordre dans le PDF
@@ -25,6 +25,11 @@ data par kind :
   message     { texte: string }                    // = footerMessage par défaut
   coordonnees {}                                   // doc.boutique
 ```
+`boutique.avisLien` (ajouté le 27/10/2026) : lien d'avis Google, réglable dans Réglages → Fidélisation,
+vide par défaut. Utilisé uniquement côté backend (`apps-script/Code.gs`, `texteRelance_`) pour ajouter
+une demande d'avis à la relance J+14 — tant qu'il est vide, rien n'est ajouté (texte pas encore validé
+par Nathalie). Pas affiché dans le bloc `coordonnees` du PDF, seulement dans l'e-mail de relance.
+
 Défauts (26/10/2026, conforme au devis « onglet Lifestyle en fin de questionnaire ») : peau/cheveux →
 entete, diagnostic, routine, conseils, **lifestyle**, message, coordonnees. Le lifestyle n'est plus un
 `doc.type` séparé : c'est un bloc systématique en fin de chaque diagnostic (voir

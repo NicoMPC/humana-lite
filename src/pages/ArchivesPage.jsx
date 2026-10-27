@@ -5,10 +5,12 @@ import { normalize } from '../lib/format';
 import { formatDate } from '../lib/dates';
 import { toast, confirmDialog } from '../store/useUI';
 import { useStudio } from '../store/useStudio';
+import { useCurrentUser } from '../store/useStore';
 import { Avatar, Badge, Button, EmptyState, Field, Input, Modal, Notice, SearchBar, SkeletonCard, Textarea } from '../components/ui';
 import DossierClientPanel from '../components/archives/DossierClientPanel';
 
-const TYPE_LABELS = { peau: 'Peau', cheveux: 'Cheveux', lifestyle: 'Lifestyle' };
+const TYPE_LABELS = { peau: 'Peau', cheveux: 'Cheveux', lifestyle: 'Lifestyle', 'formulaire-pre-rdv': 'Demande pré-rdv' };
+const MOTIF_LABELS = { cheveux: 'Cheveux', peau: 'Peau', 'les-deux': 'Cheveux et peau' };
 const typeLabel = (t) => TYPE_LABELS[String(t || '').toLowerCase()] || t || 'Document';
 const fullName = (c) => `${c.prenom || ''} ${c.nom || ''}`.trim();
 
@@ -31,10 +33,34 @@ function groupByClient(list, dateKey) {
 
 export default function ArchivesPage() {
   const navigate = useNavigate();
+  const user = useCurrentUser();
   const [state, setState] = useState({ status: 'loading', clients: [], documents: [], relances: [], pendingEnvois: [], error: '' });
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState(null);
   const [editing, setEditing] = useState(null); // relance en cours d'édition, ou null
+
+  /** Ouvre la fiche de cette cliente (depuis « Demandes pré-rdv ») et scrolle vers le panneau détail. */
+  const voirFiche = (clientId) => {
+    setSelectedId(clientId);
+    document.getElementById('archives-detail')?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  /** Démarre un diagnostic pré-rempli (prénom/nom/email) depuis une demande pré-rdv. */
+  const demarrerDepuisDemande = async (type, client) => {
+    if (!client) { toast('Cliente introuvable pour cette demande.', { type: 'error' }); return; }
+    if (useStudio.getState().doc) {
+      const ok = await confirmDialog({
+        title: 'Démarrer ce diagnostic ?',
+        message: 'Le document en cours dans le compositeur (réponses, routine…) sera remplacé. S’il a déjà été archivé, il reste dans Archives.',
+        confirmLabel: 'Démarrer',
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    useStudio.getState().start(type, user?.prenom || '');
+    useStudio.getState().setClient({ id: client.id, prenom: client.prenom, nom: client.nom, email: client.email || '' });
+    navigate('/');
+  };
 
   /** Rouvre un document archivé dans le compositeur (Studio), en confirmant si un brouillon est en cours. */
   const reprendre = async (d) => {
@@ -81,6 +107,16 @@ export default function ArchivesPage() {
   const docsByClient = useMemo(() => groupByClient(documents, 'date'), [documents]);
   const relancesByClient = useMemo(() => groupByClient(relances, 'date_relance_prevue'), [relances]);
   const pendingByClient = useMemo(() => groupByClient(pendingEnvois, 'date_creation'), [pendingEnvois]);
+
+  // Demandes pré-rdv : documents à part (type 'formulaire-pre-rdv'), pas des diagnostics —
+  // invisibles sinon tant qu'on n'ouvre pas la fiche de la bonne cliente une par une.
+  const demandesPreRdv = useMemo(() => {
+    const clientsById = new Map(clients.map((c) => [c.id, c]));
+    return documents
+      .filter((d) => d && d.type === 'formulaire-pre-rdv')
+      .map((d) => ({ ...d, client: clientsById.get(d.client_id) }))
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  }, [documents, clients]);
 
   const filtered = useMemo(() => {
     const q = normalize(search);
@@ -138,12 +174,51 @@ export default function ArchivesPage() {
         <EmptyState icon="fa-regular fa-folder-open" title="Aucune cliente archivée pour l’instant" text="Les fiches conseil archivées apparaîtront ici, classées par cliente." />
       )}
 
+      {status === 'ready' && demandesPreRdv.length > 0 && (
+        <div className="card mb-3">
+          <div className="card-header"><div><div className="eyebrow">À traiter</div><h3>Demandes pré-rdv reçues ({demandesPreRdv.length})</h3></div></div>
+          <div className="stack">
+            {demandesPreRdv.map((d) => {
+              const motif = d.composerDoc?.motif;
+              return (
+                <div key={d.id} className="subtle-card flex between wrap" style={{ gap: '.5rem' }}>
+                  <div className="grow">
+                    <div className="semibold">{d.client ? fullName(d.client) : 'Cliente inconnue'}</div>
+                    <div className="small muted">
+                      Reçue le {dateLabel(d.date)}
+                      {d.composerDoc?.dateSouhaitee ? ` · RDV souhaité le ${dateLabel(d.composerDoc.dateSouhaitee)}` : ''}
+                      {motif ? ` · ${MOTIF_LABELS[motif] || motif}` : ''}
+                    </div>
+                  </div>
+                  <div className="row gap-2">
+                    <Button size="sm" variant="ghost" icon="fa-solid fa-arrow-right" onClick={() => voirFiche(d.client?.id)} disabled={!d.client}>Voir la fiche</Button>
+                    {(motif === 'cheveux' || motif === 'peau') && (
+                      <Button size="sm" variant="soft" icon="fa-solid fa-wand-magic-sparkles" onClick={() => demarrerDepuisDemande(motif, d.client)} disabled={!d.client}>
+                        Démarrer le diagnostic
+                      </Button>
+                    )}
+                    {motif === 'les-deux' && (
+                      <>
+                        <Button size="sm" variant="soft" onClick={() => demarrerDepuisDemande('cheveux', d.client)} disabled={!d.client}>Diag. cheveux</Button>
+                        <Button size="sm" variant="soft" onClick={() => demarrerDepuisDemande('peau', d.client)} disabled={!d.client}>Diag. peau</Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {status === 'ready' && clients.length > 0 && (
         <div className="grid-side">
           <div className="stack">
             {filtered.length === 0 && <EmptyState compact icon="fa-solid fa-magnifying-glass" title="Aucun résultat" text="Aucune cliente ne correspond à cette recherche." />}
             {filtered.map((c) => {
               const n = (docsByClient.get(c.id) || []).length;
+              const aMailEnAttente = (pendingByClient.get(c.id) || []).length > 0;
+              const aRelanceAVenir = (relancesByClient.get(c.id) || []).some((r) => r.statut === 'en_attente');
               return (
                 <div
                   key={c.id}
@@ -162,13 +237,20 @@ export default function ArchivesPage() {
                       {c.email && <div className="small muted truncate">{c.email}</div>}
                     </div>
                   </div>
-                  <span className="count-pill" title="Documents">{n}</span>
+                  <div className="flex" style={{ gap: '.4rem' }}>
+                    {aMailEnAttente ? (
+                      <Badge tone="gold" dot title="Mail en attente de validation" />
+                    ) : aRelanceAVenir ? (
+                      <Badge tone="clay" dot title="Relance programmée" />
+                    ) : null}
+                    <span className="count-pill" title="Documents">{n}</span>
+                  </div>
                 </div>
               );
             })}
           </div>
 
-          <aside className="card" aria-live="polite">
+          <aside className="card" id="archives-detail" aria-live="polite">
             {!selected ? (
               <EmptyState compact icon="fa-regular fa-file-lines" title="Sélectionnez une cliente" text="Ses documents s’afficheront ici." />
             ) : (
@@ -182,6 +264,16 @@ export default function ArchivesPage() {
                     </div>
                   </div>
                 </div>
+                {(pendingAVenir.length > 0 || relancesAVenir.length > 0) && (
+                  <div className="flex wrap" style={{ gap: '.5rem' }}>
+                    {pendingAVenir.length > 0 && (
+                      <Badge tone="gold" title="Mail archivé, en attente de votre validation dans Réglages">Mail en attente de validation</Badge>
+                    )}
+                    {relancesAVenir.length > 0 && (
+                      <Badge tone="clay" title="Date de la prochaine relance automatique J+14">Prochaine relance : {dateLabel(relancesAVenir[0].date_relance_prevue)}</Badge>
+                    )}
+                  </div>
+                )}
                 {selected.folderUrl && (
                   <a className="btn btn-soft btn-sm" href={selected.folderUrl} target="_blank" rel="noopener noreferrer">
                     <i className="fa-brands fa-google-drive" aria-hidden="true" /> Ouvrir le dossier Drive

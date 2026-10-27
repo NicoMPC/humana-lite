@@ -18,6 +18,16 @@ const OBJETS = {
   tu: { peau: 'ta routine visage personnalisée', cheveux: 'ta routine capillaire personnalisée', lifestyle: 'tes conseils bien-être' },
 };
 
+// Les 2 lignes vraiment « génériques » de l'e-mail (le reste — salutation, pièce
+// jointe, signature — est mécanique, pas la voix de Nathalie/Jessie). Éditables
+// dans Réglages → Templates d'e-mail (settings.templates), avec repli sur ces
+// valeurs par défaut tant qu'elles n'ont rien personnalisé. Placeholders
+// disponibles : {contexte}, {objet}, {boutique}.
+export const DEFAULT_TEMPLATES = {
+  vous: 'Merci pour {contexte}. Vous trouverez ci-joint {objet}.\nN’hésitez pas à me poser vos questions.',
+  tu: 'Merci pour {contexte}. Tu trouveras ci-joint {objet}.\nN’hésite pas à me poser tes questions.',
+};
+
 /**
  * @param {object} p
  * @param {object} p.doc       document (contrat)
@@ -27,18 +37,24 @@ const OBJETS = {
  * @param {boolean} [p.tutoiement=false] « tu » au lieu de « vous »
  * @param {boolean} [p.archiveOk=true] false si l'archivage a échoué (PDF téléchargé en local)
  * @param {boolean} [p.autoAttache=false] true si le backend joint lui-même le PDF (pas de geste manuel à décrire)
+ * @param {object} [p.templates] { vous, tu } — surcharge éditable de DEFAULT_TEMPLATES (settings.templates)
  */
-export function buildEmail({ doc, fileUrl, folderUrl, fileName, tutoiement = false, archiveOk = true, autoAttache = false }) {
+export function buildEmail({ doc, fileUrl, folderUrl, fileName, tutoiement = false, archiveOk = true, autoAttache = false, templates }) {
   const m = tutoiement ? 'tu' : 'vous';
   const boutique = doc.boutique?.nom || 'Hu’mana';
   const prenom = doc.client?.prenom || '';
   const contexte = doc.meta?.lieu === 'visio' ? 'notre échange en visio' : tutoiement ? 'ta visite à la boutique' : 'votre visite à la boutique';
   const objet = OBJETS[m][doc.type] || OBJETS[m].peau;
+  const tpl = (templates && templates[m]) || DEFAULT_TEMPLATES[m];
+  const corpsPrincipal = tpl
+    .replace(/\{contexte\}/g, contexte)
+    .replace(/\{objet\}/g, objet)
+    .replace(/\{boutique\}/g, boutique)
+    .split('\n');
   const lignes = [
     prenom ? `Bonjour ${prenom},` : 'Bonjour,',
     '',
-    `Merci pour ${contexte}. ${tutoiement ? 'Tu trouveras' : 'Vous trouverez'} ci-joint ${objet}.`,
-    tutoiement ? 'N’hésite pas à me poser tes questions.' : 'N’hésitez pas à me poser vos questions.',
+    ...corpsPrincipal,
   ];
   if (!autoAttache) {
     lignes.push(

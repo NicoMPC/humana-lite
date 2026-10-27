@@ -18,10 +18,11 @@
  *   ArchClientes  : id | cle | prenom | nom | email | folderUrl | date_creation | json
  *   ArchDocuments : id | client_id | type | date | auteur | url | nom | json
  *   EnvoisEnAttente : id | client_id | email | prenom | sujet | date_creation | statut | auteur | json
- *     (json ajoute : corps, fileId, fileUrl, fileName, boutiqueNom, tutoiement)
+ *     (json ajoute : corps, fileId, fileUrl, fileName, boutiqueNom, avisLien, tutoiement)
  *   RelanceQueue  : id | client_id | email | prenom | date_envoi_diag | date_relance_prevue | statut | auteur | json
  *     (json ajoute : nom, boutiqueNom, tutoiement, sujet, corps — brouillon généré à la
- *     programmation, éditable jusqu'à J-1 —, modifie:boolean)
+ *     programmation, éditable jusqu'à J-1 —, modifie:boolean ; avisLien utilisé seulement pour
+ *     générer corps à la création, pas stocké séparément sur la relance)
  *   LiteProduits  : id | nom | reference | prix | categorie | actif | stock | json
  *     (json = objet produit complet : id, nom, prix, categorie, actif, stock, cible,
  *     reference, ean, description — catalogue partagé Jessie/Nathalie)
@@ -396,11 +397,44 @@ function archivePdf_(p) {
     upsert_(SHEETS.documents, doc, {
       client_id: doc.client_id, type: doc.type, date: doc.date, auteur: doc.auteur, url: doc.url, nom: doc.nom,
     });
+    incrementerStatsDiagnostic_(docType);
     SpreadsheetApp.flush();
     return { client, clientId: client.id, folderUrl: client.folderUrl, fileUrl, fileId: file.getId(), created };
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * Compteur interne (pas pour Nathalie/Jessie, pour nous) du nombre de diagnostics
+ * réellement générés — un par appel de archivePdf_ réussi (envoi auto, validation
+ * manuelle ou simple archivage prennent tous ce chemin). Stocké dans les
+ * Script Properties (pas le Sheet Reglages : celui-ci est remplacé en entier à
+ * chaque push front-end, un compteur y serait écrasé). Demandé par Nicolas le 27/10.
+ */
+function incrementerStatsDiagnostic_(docType) {
+  const props = PropertiesService.getScriptProperties();
+  const cle = 'STATS_DIAG_' + (docType === 'peau' || docType === 'cheveux' ? docType.toUpperCase() : 'AUTRE');
+  props.setProperty(cle, String((parseInt(props.getProperty(cle), 10) || 0) + 1));
+  props.setProperty('STATS_DIAG_TOTAL', String((parseInt(props.getProperty('STATS_DIAG_TOTAL'), 10) || 0) + 1));
+  if (!props.getProperty('STATS_DIAG_DEPUIS')) props.setProperty('STATS_DIAG_DEPUIS', new Date().toISOString());
+}
+
+/** Lecture des compteurs ci-dessus — exposé en API (action statsDiagnostics) ET utilisable à la main. */
+function statsDiagnostics_() {
+  const props = PropertiesService.getScriptProperties();
+  return {
+    total: parseInt(props.getProperty('STATS_DIAG_TOTAL'), 10) || 0,
+    peau: parseInt(props.getProperty('STATS_DIAG_PEAU'), 10) || 0,
+    cheveux: parseInt(props.getProperty('STATS_DIAG_CHEVEUX'), 10) || 0,
+    autre: parseInt(props.getProperty('STATS_DIAG_AUTRE'), 10) || 0,
+    depuis: props.getProperty('STATS_DIAG_DEPUIS') || null,
+  };
+}
+
+/** Wrapper SANS underscore : visible dans le menu Exécuter de l'éditeur Apps Script, pour un coup d'oeil rapide sans curl. */
+function voirStatsDiagnostics() {
+  Logger.log(JSON.stringify(statsDiagnostics_(), null, 2));
 }
 
 const MAX_PHOTOS_PRE_RDV = 6;
@@ -744,13 +778,27 @@ const RELANCE_TEXTE = {
   ].join('\n'),
 };
 
-function texteRelance_(prenom, tutoiement, boutiqueNom) {
+// Demande d'avis Google ajoutée à la relance (surprise du 27/10/2026, pas encore
+// validée par Nathalie) : n'apparaît que si un lien d'avis est renseigné dans les
+// Réglages (settings.boutique.avisLien) — vide par défaut, donc dormant jusqu'à
+// ce qu'elle fournisse le vrai lien et valide ce texte.
+const DEMANDE_AVIS_TEXTE = {
+  vous: 'Si vous êtes satisfaite, un petit avis sur Google nous aiderait énormément à nous faire connaître : {avisLien}',
+  tu: 'Si tu es contente, un petit avis Google nous aiderait énormément à nous faire connaître : {avisLien}',
+};
+
+function texteRelance_(prenom, tutoiement, boutiqueNom, avisLien) {
   const tpl = tutoiement ? RELANCE_TEXTE.tu : RELANCE_TEXTE.vous;
   const signature = "L'équipe " + (boutiqueNom || "Hu'mana");
-  return tpl
+  let texte = tpl
     .replace('{prenom}', prenom || '')
     .replace('{delai}', String(RELANCE_DELAI_JOURS))
     .replace('{signature}', signature);
+  if (avisLien) {
+    const demandeAvis = (tutoiement ? DEMANDE_AVIS_TEXTE.tu : DEMANDE_AVIS_TEXTE.vous).replace('{avisLien}', avisLien);
+    texte = texte.replace('\nÀ très vite,', '\n' + demandeAvis + '\n\nÀ très vite,');
+  }
+  return texte;
 }
 
 function sujetRelance_(boutiqueNom) {
@@ -762,7 +810,7 @@ function sujetRelance_(boutiqueNom) {
  * Génère tout de suite le brouillon par défaut (sujet/corps) : c'est ce texte qui
  * part tel quel à J+14, sauf si la praticienne l'édite avant (modifierRelance_, jusqu'à J-1).
  */
-function programmerRelance_(client, boutiqueNom, tutoiement, auteur) {
+function programmerRelance_(client, boutiqueNom, tutoiement, auteur, avisLien) {
   if (!client.email) return; // pas d'email, pas de relance possible
   const aujourdhui = ajourdhui_();
   const relance = {
@@ -778,7 +826,7 @@ function programmerRelance_(client, boutiqueNom, tutoiement, auteur) {
     statut: 'en_attente',
     auteur: cleanName_(auteur),
     sujet: sujetRelance_(boutiqueNom),
-    corps: texteRelance_(client.prenom, tutoiement, boutiqueNom),
+    corps: texteRelance_(client.prenom, tutoiement, boutiqueNom, avisLien),
     modifie: false,
   };
   upsert_(SHEETS.relances, relance, {
@@ -789,7 +837,7 @@ function programmerRelance_(client, boutiqueNom, tutoiement, auteur) {
 }
 
 /**
- * payload : { client, docType, fileName, dataUrl, meta, email:{to,sujet,corps}, boutique:{nom}, tutoiement }
+ * payload : { client, docType, fileName, dataUrl, meta, email:{to,sujet,corps}, boutique:{nom,avisLien}, tutoiement }
  * Archive (réutilise archivePdf_) puis, selon le réglage global :
  *  - validation désactivée : envoie tout de suite, trace Agenda, programme la relance J+14 ;
  *  - validation activée (option C) : met l'e-mail en attente, rien n'est envoyé sans clic humain.
@@ -798,6 +846,7 @@ function archiveEtEnvoyer_(p) {
   const archive = archivePdf_(p);
   const email = (p && p.email) || {};
   const boutiqueNom = (p && p.boutique && p.boutique.nom) || "Hu'mana";
+  const avisLien = (p && p.boutique && p.boutique.avisLien) || '';
   const client = archive.client;
 
   if (getValidationAvantEnvoi_()) {
@@ -812,6 +861,7 @@ function archiveEtEnvoyer_(p) {
       fileUrl: archive.fileUrl,
       fileName: p.fileName,
       boutiqueNom,
+      avisLien,
       tutoiement: !!p.tutoiement,
       auteur: cleanName_((p.meta && p.meta.auteur) || ''),
       date_creation: new Date().toISOString(),
@@ -827,7 +877,7 @@ function archiveEtEnvoyer_(p) {
 
   envoyerMail_(email.to || client.email, email.sujet, email.corps, archive.fileId, boutiqueNom);
   creerTraceAgenda_("Envoi — " + client.prenom + ' ' + client.nom, 'PDF : ' + archive.fileUrl);
-  programmerRelance_(client, boutiqueNom, p.tutoiement, (p.meta && p.meta.auteur) || '');
+  programmerRelance_(client, boutiqueNom, p.tutoiement, (p.meta && p.meta.auteur) || '', avisLien);
   SpreadsheetApp.flush();
   return { clientId: archive.clientId, folderUrl: archive.folderUrl, fileUrl: archive.fileUrl, fileId: archive.fileId, created: archive.created, envoiStatut: 'envoye' };
 }
@@ -853,7 +903,7 @@ function validerEnvoi_(id) {
 
     const clients = readAll_(SHEETS.clients);
     const client = clients.find((x) => x && x.id === pending.client_id) || { id: pending.client_id, prenom: pending.prenom, nom: '', email: pending.email };
-    programmerRelance_(client, pending.boutiqueNom, pending.tutoiement, pending.auteur);
+    programmerRelance_(client, pending.boutiqueNom, pending.tutoiement, pending.auteur, pending.avisLien);
     SpreadsheetApp.flush();
     return { ok: true };
   } finally {
@@ -1009,6 +1059,9 @@ function doGet(e) {
     }
     if (action === 'pullConseils') {
       return json_({ ok: true, conseils: pullConseils_() });
+    }
+    if (action === 'statsDiagnostics') {
+      return json_({ ok: true, stats: statsDiagnostics_() });
     }
     return json_({ ok: false, error: 'Action inconnue : ' + action });
   } catch (err) {

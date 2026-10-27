@@ -28,6 +28,10 @@ export const SETTINGS_DEFAULT = {
   // Message de fin par défaut (= « signature » du PDF) ; repris dans chaque nouveau document.
   footerMessage: 'Prenez soin de vous, simplement.',
   stock: { dernierImport: null, historique: [] },
+  // Bandeau « Démarrage » (27/10/2026) : rappel non bloquant tant qu'il n'a pas été
+  // vu une fois par Jessie ou Nathalie — partagé entre les 2 postes comme le reste
+  // des réglages, pas par utilisatrice.
+  demarrageVu: false,
 };
 
 export function buildSeed() {

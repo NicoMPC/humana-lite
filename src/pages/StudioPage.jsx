@@ -57,6 +57,9 @@ export default function StudioPage() {
 /* ---------------- 0 · Choix ---------------- */
 function TypeChoice() {
   const user = useCurrentUser();
+  const navigate = useNavigate();
+  const demarrageVu = useStore((s) => s.settings.demarrageVu);
+  const updateSettings = useStore((s) => s.updateSettings);
   const { doc, start, setStep } = useStudio.getState();
   const pick = (type) => {
     // Même type que le brouillon en cours : on le reprend ; sinon nouveau brouillon.
@@ -65,6 +68,17 @@ function TypeChoice() {
   };
   return (
     <>
+      {!demarrageVu && (
+        <Notice icon="fa-regular fa-hand-sparkles" tone="amber" className="mb-3">
+          <b>Avant de commencer :</b> on a mis des valeurs par défaut partout (coordonnées, templates d’e-mail,
+          questions de diagnostic). Jetez-y un œil dans <b>Réglages</b> et <b>Contenu</b> et changez ce qui doit
+          l’être — sinon, pas de souci, vous pouvez utiliser l’appli tel quel dès maintenant.
+          <div className="row gap-2 mt-2">
+            <Button size="sm" variant="primary" onClick={() => navigate('/reglages')}>Aller dans Réglages</Button>
+            <Button size="sm" variant="ghost" onClick={() => updateSettings({ demarrageVu: true })}>J’ai vérifié, ne plus afficher</Button>
+          </div>
+        </Notice>
+      )}
       {doc && (
         <Notice icon="fa-regular fa-clock" className="mb-3">
           Un document {DIAG_TYPES[doc.type].label.toLowerCase()} est en cours{doc.client.prenom || doc.client.nom ? ` (${doc.client.prenom} ${doc.client.nom})` : ''}. Choisir le même type le reprend ; un autre type repart de zéro.
@@ -143,6 +157,7 @@ function ComposeStep({ doc }) {
   const navigate = useNavigate();
   const actions = useStudio.getState();
   const tutoiement = useStudio((s) => s.tutoiement);
+  const templates = useStore((s) => s.settings.templates);
   const users = useStore(useShallow((s) => s.users.filter((u) => u.actif !== false)));
   const [busy, setBusy] = useState(null); // 'send' | 'archive'
   const [result, setResult] = useState(null);
@@ -180,13 +195,13 @@ function ComposeStep({ doc }) {
       // aller-retour serveur), avec le PDF déjà joint côté backend ; repli manuel
       // (Gmail pré-rempli, pièce jointe à glisser) si le serveur échoue — jamais
       // d'échec silencieux, c'est une promesse du devis.
-      const emailDraft = buildEmail({ doc, fileName: pdf.fileName, tutoiement, archiveOk: true, autoAttache: true });
+      const emailDraft = buildEmail({ doc, fileName: pdf.fileName, tutoiement, archiveOk: true, autoAttache: true, templates });
       let res;
       try {
         res = await archiveEtEnvoyer({
           client: doc.client, docType: doc.type, fileName: pdf.fileName, dataUrl: pdf.dataUrl, meta,
           email: { to: emailDraft.to, sujet: emailDraft.sujet, corps: emailDraft.corps },
-          boutique: { nom: doc.boutique?.nom }, tutoiement, composerDoc: doc,
+          boutique: { nom: doc.boutique?.nom, avisLien: doc.boutique?.avisLien }, tutoiement, composerDoc: doc,
         });
       } catch (e) {
         res = { ok: false, error: String(e) };
@@ -204,7 +219,7 @@ function ComposeStep({ doc }) {
         setResult({ mode, archiveOk, auto: true, pending: true, fileUrl: res.fileUrl, folderUrl: res.folderUrl, fileName: pdf.fileName });
       } else {
         // Envoi automatique indisponible (serveur non configuré, erreur réseau…) : repli manuel.
-        const mailUrl = gmailComposeUrl(buildEmail({ doc, fileUrl: res?.fileUrl, folderUrl: res?.folderUrl, fileName: pdf.fileName, tutoiement, archiveOk }));
+        const mailUrl = gmailComposeUrl(buildEmail({ doc, fileUrl: res?.fileUrl, folderUrl: res?.folderUrl, fileName: pdf.fileName, tutoiement, archiveOk, templates }));
         window.open(mailUrl, '_blank');
         toast(`Envoi automatique indisponible${res?.error ? ` (${res.error})` : ''} : Gmail ouvert pour un envoi manuel.`, { type: 'warning', duration: 13000 });
         setResult({ mode, archiveOk, auto: false, mailUrl, fileUrl: res?.fileUrl, folderUrl: res?.folderUrl, fileName: pdf.fileName, error: res?.error });

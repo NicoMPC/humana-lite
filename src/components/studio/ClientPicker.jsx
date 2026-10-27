@@ -98,7 +98,14 @@ export function ClientPicker({ value, onChange }) {
         {renderField('prenom', 'Prénom', 'Prénom')}
         {renderField('nom', 'Nom', 'Nom')}
       </div>
-      <Field label="E-mail (facultatif)" hint={v.id ? 'Cliente déjà archivée : le dossier Drive sera réutilisé.' : 'Nouvelle cliente : un dossier Drive sera créé.'}>
+      <Field
+        label="E-mail (facultatif)"
+        hint={
+          !v.email
+            ? 'Sans e-mail, l’envoi automatique et la relance ne fonctionneront pas pour cette cliente (repli manuel via Gmail possible).'
+            : v.id ? 'Cliente déjà archivée : le dossier Drive sera réutilisé.' : 'Nouvelle cliente : un dossier Drive sera créé.'
+        }
+      >
         <Input type="email" value={v.email || ''} placeholder="prenom.nom@exemple.fr" autoComplete="off" onChange={(e) => onChange({ ...v, email: e.target.value })} />
       </Field>
     </div>

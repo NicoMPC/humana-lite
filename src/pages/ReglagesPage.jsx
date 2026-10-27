@@ -3,11 +3,15 @@ import { useStore } from '../store/useStore';
 import { toast, confirmDialog } from '../store/useUI';
 import { Button, Field, Input, Notice, Switch, Textarea } from '../components/ui';
 import { getReglagesEnvoi, setValidationAvantEnvoi, pullEnvoisEnAttente, validerEnvoi, annulerEnvoi } from '../lib/sheetsSync';
+import { DEFAULT_TEMPLATES } from '../lib/email';
 
 const FIELDS = [
   ['nom', 'Nom de la boutique'], ['slogan', 'Slogan'], ['adresse', 'Adresse'], ['telephone', 'Téléphone'],
   ['email', 'Email'], ['site', 'Site web'], ['instagram', 'Instagram'],
 ];
+
+const AVIS_HINT = 'Une fois ce lien renseigné, chaque relance (J+14) se termine automatiquement par une demande d’avis Google. Laissez vide pour ne rien envoyer : le texte n’est pas encore validé par vous.';
+const TEMPLATES_HINT = 'Les 2 phrases de l’e-mail envoyé avec chaque diagnostic (le reste — salutation, pièce jointe, signature — est automatique). Placeholders disponibles : {contexte}, {objet}, {boutique}.';
 
 /** Réglages : coordonnées de la boutique, message de fin par défaut. */
 export default function ReglagesPage() {
@@ -15,9 +19,10 @@ export default function ReglagesPage() {
   const updateSettings = useStore((s) => s.updateSettings);
   const [boutique, setBoutique] = useState({ ...settings.boutique });
   const [footer, setFooter] = useState(settings.footerMessage || '');
+  const [templates, setTemplates] = useState({ ...DEFAULT_TEMPLATES, ...settings.templates });
 
   const save = () => {
-    updateSettings({ boutique, footerMessage: footer });
+    updateSettings({ boutique, footerMessage: footer, templates });
     toast('Réglages enregistrés — ils s’appliquent aux prochains documents.');
   };
 
@@ -48,6 +53,24 @@ export default function ReglagesPage() {
           <div className="card-header"><div><div className="eyebrow">Document</div><h3>Signature / message de fin</h3></div></div>
           <Field hint="Message affiché en bas de chaque PDF, modifiable dans chaque document.">
             {(id) => <Textarea id={id} rows={3} value={footer} onChange={(e) => setFooter(e.target.value)} />}
+          </Field>
+        </div>
+
+        <div className="card">
+          <div className="card-header"><div><div className="eyebrow">Document</div><h3>Templates d’e-mail (envoi du diagnostic)</h3></div></div>
+          <p className="small muted">{TEMPLATES_HINT}</p>
+          <Field label="Version « vous »">
+            {(id) => <Textarea id={id} rows={2} value={templates.vous} onChange={(e) => setTemplates((t) => ({ ...t, vous: e.target.value }))} />}
+          </Field>
+          <Field label="Version « tu »">
+            {(id) => <Textarea id={id} rows={2} value={templates.tu} onChange={(e) => setTemplates((t) => ({ ...t, tu: e.target.value }))} />}
+          </Field>
+        </div>
+
+        <div className="card">
+          <div className="card-header"><div><div className="eyebrow">Fidélisation</div><h3>Demande d’avis Google (à la relance)</h3></div></div>
+          <Field hint={AVIS_HINT}>
+            {(id) => <Input id={id} placeholder="https://g.page/r/..." value={boutique.avisLien || ''} onChange={(e) => setBoutique((b) => ({ ...b, avisLien: e.target.value }))} />}
           </Field>
         </div>
 
