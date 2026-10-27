@@ -20,7 +20,10 @@ export const SETTINGS_DEFAULT = {
     nom: 'Hu’mana – La Boutique',
     slogan: 'Beauté naturelle',
     adresse: '85 Impasse des Amandiers, 07170 Saint-Germain',
-    telephone: '04 75 00 00 00',
+    // Vrai numéro, retrouvé par Nicolas le 27/10/2026 dans la signature mail
+    // réelle de Nathalie/Jessie (boîte humanabeautenaturelle@gmail.com) — remplace
+    // un placeholder inventé (04 75 00 00 00).
+    telephone: '07.49.54.30.20',
     email: 'contact@humana-boutique.fr',
     site: 'www.humana-boutique.fr',
     instagram: '@humana.laboutique',

@@ -142,6 +142,35 @@ const RELANCE_DELAI_JOURS = 14;
 // qu'aucun réglage n'a encore été écrit en Propriétés du script.
 const VALIDATION_AVANT_ENVOI_DEFAUT = true;
 
+// Image de signature (photo de Nathalie & Jessie + logo), reprise de leur vraie
+// signature mail le 27/10/2026 sur demande explicite de Nicolas — SEULE exception
+// à la règle « jamais de HTML/logo dans un mail » suivie côté humana-boutique.
+// Hébergée en statique sur le même GitHub Pages que l'appli (public/email/ ->
+// copié tel quel dans dist/email/ par Vite), pas en pièce jointe ni en base64
+// dans ce script pour ne pas l'alourdir.
+const SIGNATURE_IMAGE_URL = 'https://nicompc.github.io/humana-lite/email/signature-humana.jpg';
+
+/**
+ * Convertit un corps de mail texte brut (tel que généré par le front ou les
+ * templates de relance) en HTML minimal : échappement, retours à la ligne en
+ * <br>, puis la photo de signature ajoutée en bas. `body` (texte brut) reste
+ * envoyé en parallèle comme repli pour les clients mail qui n'affichent pas le HTML.
+ */
+function corpsHtml_(corpsPlain) {
+  const echappe = String(corpsPlain || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .split('\n')
+    .join('<br>');
+  return (
+    '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#1f2937;">' +
+    echappe +
+    '<br><br><img src="' + SIGNATURE_IMAGE_URL + '" alt="Hu\'mana Beauté naturelle" width="320" style="max-width:320px;border:0;">' +
+    '</div>'
+  );
+}
+
 function getToken_() {
   return PropertiesService.getScriptProperties().getProperty('TOKEN');
 }
@@ -746,7 +775,7 @@ function definirValidationAvantEnvoi_(bool) {
 function envoyerMail_(to, sujet, corps, fileId, nomExpediteur) {
   if (!to) throw new Error('E-mail de la cliente manquant');
   const file = DriveApp.getFileById(fileId);
-  const options = { name: nomExpediteur || "Hu'mana", attachments: [file.getBlob()] };
+  const options = { name: nomExpediteur || "Hu'mana", attachments: [file.getBlob()], htmlBody: corpsHtml_(corps) };
   GmailApp.sendEmail(to, sujet, corps, options);
 }
 
@@ -1018,7 +1047,7 @@ function verifierRelances_() {
       try {
         const sujet = r.sujet || sujetRelance_(r.boutiqueNom);
         const corps = r.corps || texteRelance_(r.prenom, r.tutoiement, r.boutiqueNom);
-        MailApp.sendEmail(r.email, sujet, corps, { name: r.boutiqueNom || "Hu'mana" });
+        MailApp.sendEmail(r.email, sujet, corps, { name: r.boutiqueNom || "Hu'mana", htmlBody: corpsHtml_(corps) });
         creerTraceAgenda_('Relance J+' + RELANCE_DELAI_JOURS + ' — ' + r.prenom, 'Relance automatique envoyée à ' + r.email);
         r.statut = 'envoyee';
       } catch (e) {
@@ -1138,6 +1167,40 @@ function doPost(e) {
   } catch (err) {
     return json_({ ok: false, error: errMsg_(err) });
   }
+}
+
+/** Raccourci visible dans le menu « Exécuter » — purge les 3 fiches de test posées
+ * pendant le développement (toutes nommées « ClaudeTest », visibles via action `pull`
+ * le 27/10/2026). IDs codés en dur exprès pour ne risquer de toucher à rien d'autre.
+ * Supprime les lignes ArchClientes/ArchDocuments correspondantes et met les dossiers
+ * Drive associés à la corbeille (récupérables 30 jours). À exécuter UNE SEULE FOIS. */
+function purgerArchivesTest() {
+  const clientIds = ['cli_6548fba89ea5', 'cli_b7bed30acba2', 'cli_a357fcf3483d'];
+  const documentIds = ['doc_0466f93733d1', 'doc_9d59c312288b', 'doc_6ad19a965e7a'];
+  const folderIds = ['1f0Hh5PhZKs5lQPrBePI0dMjz9RwbnfSt', '1-bP__kAaVkI1FnYfDUlDhODzFL7eE6bn', '16GMmUlK-c2afjjfVWa1MfJVYMQCwPG_Q'];
+  const resultat = { clientsSupprimes: 0, documentsSupprimes: 0, dossiersMisALaCorbeille: [], erreurs: [] };
+
+  [[SHEETS.clients, clientIds, 'clientsSupprimes'], [SHEETS.documents, documentIds, 'documentsSupprimes']].forEach(([sheetName, ids, compteur]) => {
+    const sh = sheet_(sheetName);
+    const values = sh.getDataRange().getValues();
+    const header = values[0] || [];
+    const idCol = header.indexOf('id');
+    for (let i = values.length - 1; i >= 1; i--) {
+      if (ids.indexOf(values[i][idCol]) !== -1) {
+        sh.deleteRow(i + 1);
+        resultat[compteur]++;
+      }
+    }
+  });
+
+  folderIds.forEach((id) => {
+    try {
+      DriveApp.getFolderById(id).setTrashed(true);
+      resultat.dossiersMisALaCorbeille.push(id);
+    } catch (e) { resultat.erreurs.push(id + ': ' + String(e)); }
+  });
+
+  return resultat;
 }
 
 // Diagnostic temporaire (erreur "non autorisé à accéder au document" sur archivePdf/archiveEtEnvoyer,

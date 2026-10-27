@@ -65,6 +65,11 @@ export function buildEmail({ doc, fileUrl, folderUrl, fileName, tutoiement = fal
   if (fileUrl) lignes.push(`Lien du document : ${fileUrl}`);
   else if (folderUrl) lignes.push(`Dossier : ${folderUrl}`);
   lignes.push('', 'À très vite,', doc.meta?.auteur || '', boutique);
+  // Signature par défaut (adresse + téléphone), reprise de la vraie signature
+  // mail de Nathalie/Jessie le 27/10/2026 — pas de logo/HTML (règle du projet).
+  if (doc.boutique?.adresse || doc.boutique?.telephone) {
+    lignes.push('', [doc.boutique?.adresse, doc.boutique?.telephone].filter(Boolean).join('\n'));
+  }
   return {
     to: doc.client?.email || '',
     sujet: `${SUJETS[doc.type] || SUJETS.peau} – ${boutique}`,
