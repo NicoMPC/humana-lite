@@ -101,6 +101,7 @@ const HEADERS = {
   Reglages: ['id', 'boutique_nom', 'date_maj', 'json'],
   LiteQuestions: ['id', 'date_maj', 'json'],
   LiteConseils: ['id', 'date_maj', 'json'],
+  Remarques: ['id', 'date', 'auteur', 'ecran', 'chemin', 'texte', 'json'],
 };
 
 // Id fixe de l'unique ligne de réglages (pas une liste, un seul document partagé).
@@ -292,6 +293,27 @@ function normalize_(s) {
 
 function clientKey_(prenom, nom) {
   return normalize_(nom) + '|' + normalize_(prenom);
+}
+
+/**
+ * Bouton flottant « Une remarque » : simple journal, pas de notion de cliente —
+ * un texte libre + le contexte figé au moment du clic (écran, autrice, date).
+ * Jamais mis à jour une fois écrit, juste accumulé pour relecture (par Nicolas
+ * pendant le chantier, puis par Claude en début de session une fois en prod).
+ */
+function envoyerRemarque_(p) {
+  const texte = cleanName_(p && p.texte);
+  if (!texte) throw new Error('Remarque vide.');
+  const obj = {
+    id: uid_('rq'),
+    date: (p && p.date) || new Date().toISOString(),
+    auteur: (p && p.auteur) || '',
+    ecran: (p && p.ecran) || '',
+    chemin: (p && p.chemin) || '',
+    texte,
+  };
+  sheet_('Remarques').appendRow([obj.id, obj.date, obj.auteur, obj.ecran, obj.chemin, obj.texte, JSON.stringify(obj)]);
+  return { ok: true };
 }
 
 function cleanName_(s) {
@@ -1060,6 +1082,9 @@ function doGet(e) {
     if (action === 'pullConseils') {
       return json_({ ok: true, conseils: pullConseils_() });
     }
+    if (action === 'pullRemarques') {
+      return json_({ ok: true, remarques: readAll_('Remarques') });
+    }
     if (action === 'statsDiagnostics') {
       return json_({ ok: true, stats: statsDiagnostics_() });
     }
@@ -1105,6 +1130,8 @@ function doPost(e) {
         return json_(Object.assign({ ok: true }, pushQuestions_(payload && payload.questions)));
       case 'pushConseils':
         return json_(Object.assign({ ok: true }, pushConseils_(payload && payload.conseils)));
+      case 'envoyerRemarque':
+        return json_(envoyerRemarque_(payload));
       default:
         return json_({ ok: false, error: 'Action inconnue : ' + action });
     }

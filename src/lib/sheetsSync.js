@@ -263,6 +263,22 @@ export async function soumettreFormulairePreRdv(payload) {
   }
 }
 
+/**
+ * Bouton flottant « Une remarque » (visible en permanence dans l'appli) : capture
+ * un texte libre + le contexte figé au moment du clic (écran, autrice, date),
+ * ajouté à l'onglet Remarques du Sheet. -> { ok } ou { ok:false, error }
+ */
+export async function envoyerRemarque({ texte, ecran, chemin, auteur, date } = {}) {
+  if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  try {
+    const res = await apiPost('envoyerRemarque', { texte, ecran, chemin, auteur, date });
+    if (!res?.ok) return { ok: false, error: res?.error || 'Échec inconnu' };
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
 /** Questions de diagnostic personnalisées -> { ok, questions } (objet { peau, cheveux } ou null) */
 export async function pullQuestions() {
   if (!isConfigured()) return { ok: false, error: NOT_CONFIGURED, questions: null };

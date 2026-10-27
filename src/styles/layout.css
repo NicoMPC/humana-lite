@@ -75,6 +75,18 @@
 .bug-fab:hover { color: var(--accent-strong); border-color: var(--accent-strong); transform: translateY(-2px); }
 .bug-fab:active { transform: scale(.94); }
 
+/* Bouton flottant « Une remarque » (bas gauche, toujours visible, même emplacement que bug-fab) */
+.remarque-fab {
+  position: fixed; z-index: 45; left: calc(var(--sidebar-w) + 18px); bottom: 18px;
+  display: flex; align-items: center; gap: .5rem; padding: .65rem 1rem .65rem .85rem;
+  border-radius: 999px; background: var(--bg-elevated); color: var(--text-3); border: 1px solid var(--border);
+  box-shadow: var(--shadow-md); font-size: .8rem; font-weight: 700; cursor: pointer;
+  transition: transform var(--dur) var(--ease), color var(--dur-fast), border-color var(--dur-fast);
+}
+.remarque-fab i { font-size: 1rem; }
+.remarque-fab:hover { color: var(--accent-strong); border-color: var(--accent-strong); transform: translateY(-2px); }
+.remarque-fab:active { transform: scale(.96); }
+
 /* Mobile */
 @media (max-width: 767px) {
   .sidebar { display: none; }
@@ -93,6 +105,8 @@
   .bottom-nav button i { font-size: 1.15rem; transition: transform var(--dur) var(--ease); }
   .bottom-nav button.is-active { color: var(--primary-strong); }
   .bottom-nav button.is-active i { transform: translateY(-2px); }
+  .remarque-fab { left: 14px; bottom: calc(var(--bottomnav-h) + var(--safe-bottom) + 14px); padding: .6rem .8rem; }
+  .remarque-fab span { display: none; }
   .bottom-nav button:active i { transform: scale(.9); }
   .fab {
     display: grid; place-items: center; position: fixed; right: 18px; bottom: calc(var(--bottomnav-h) + var(--safe-bottom) + 18px); z-index: 45;

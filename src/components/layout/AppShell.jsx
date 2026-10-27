@@ -3,6 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useCurrentUser, useStore } from '../../store/useStore';
 import { fullName } from '../../lib/format';
 import { Avatar, Button } from '../ui';
+import { RemarqueButton } from '../RemarqueButton';
 
 const NAV = [
   { to: '/', label: 'Nouveau document', icon: 'fa-solid fa-file-circle-plus', end: true },
@@ -75,6 +76,8 @@ export function AppShell({ children }) {
           </NavLink>
         ))}
       </nav>
+
+      <RemarqueButton />
     </div>
   );
 }
